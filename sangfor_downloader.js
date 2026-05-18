@@ -1,0 +1,583 @@
+/**
+ * 深信服报告下载器 - 主脚本
+ * 自动下载指定客户、指定时间段的【资产表】、【事件表】、【告警表】和【资产漏洞表】Excel数据
+ * 
+ * 使用方法:
+ *   node sangfor_downloader.js                                    # 交互式
+ *   node sangfor_downloader.js --customer "客户名" --start "2024-01-01" --end "2024-01-31"
+ *   node sangfor_downloader.js --type asset                       # 只下载资产表
+ *   node sangfor_downloader.js --type event                       # 只下载事件表
+ *   node sangfor_downloader.js --type alarm                       # 只下载告警表
+ *   node sangfor_downloader.js --type vuln                        # 只下载资产漏洞表
+ */
+
+const path = require('path');
+const fs = require('fs');
+
+// 引入模块
+const cookieReader = require('./cookie_reader');
+const apiClient = require('./api_client');
+
+// 配置
+const CONFIG = {
+  // Cookie 文件路径 (由浏览器插件生成)
+  cookiePath: process.env.SANGFOR_COOKIE_PATH || path.join(__dirname, 'cookies.txt'),
+
+  // 报告模板路径
+  reportTemplatePath: process.env.SANGFOR_REPORT_TEMPLATE_PATH || 'M:\\Device\\C\\Users\\xupai\\.openclaw\\workspace\\skills\\sangfor-report-downloader\\data.xlsx',
+  
+  // 输出目录
+  outputDir: process.cwd(),
+  
+  // 默认请求参数
+  defaultPageSize: 100,
+  maxRetries: 3,
+  retryDelay: 2000
+};
+
+const EVENT_HEADER_DISPLAY_MAP = {
+  event_grading_tag: '事件类型',
+  create_time: '事件创建时间',
+  type: '类型',
+  host_ip: '主机 IP',
+  event_status: '状态',
+  service_status: '服务类型',
+  latest_time: '最近更新时间',
+  checkout_time: '组件检出时间',
+  dispose_time: '专家研判时间',
+  contain_time: '事件遏制时间',
+  finished_time: '事件闭环时间',
+  incidence: '影响范围',
+  update_accept_risk_time: '接受风险时间',
+  update_announced_time: '通告时间',
+  update_protected_time: '防护时间',
+  push_status: '通告状态',
+  wechat_push_time: '实际通告时间'
+};
+
+const ALARM_HEADER_DISPLAY_MAP = {
+  alarm_name: '告警名称',
+  host_ip: '主机IP',
+  type: '威胁类型',
+  event_status: '告警状态',
+  first_time: '首次触发时间',
+  latest_time: '最近触发时间',
+  service_status: '服务类型',
+  create_time: '创建时间',
+  attack_state: '攻击结果',
+  attack_direction: '访问方向',
+  current_operate_time: '操作时间',
+  rejected_event_id: '驳回事件ID',
+  current_operator: '驳回人',
+  reject_reason: '驳回原因'
+};
+
+/**
+ * 解析命令行参数
+ */
+function parseArgs() {
+  const args = process.argv.slice(2);
+  const options = {
+    customer: '',
+    startDate: '',
+    endDate: '',
+    type: 'all',  // all, asset, event, alarm, vuln
+    customerId: '',
+    pageSize: CONFIG.defaultPageSize,
+    responseOnly: false,
+    cookiePath: CONFIG.cookiePath,
+    reportTemplatePath: CONFIG.reportTemplatePath,
+    manageSubTypeMapFile: process.env.SANGFOR_MANAGE_SUB_TYPE_MAP_FILE || path.join(__dirname, 'data', 'manage_sub_type_map.json'),
+    assetMapFile: process.env.SANGFOR_ASSET_MAP_FILE || path.join(__dirname, 'data', 'asset.xlsx')
+  };
+  
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    
+    switch (arg) {
+      case '--customer':
+      case '-c':
+        options.customer = args[++i] || '';
+        break;
+      case '--start':
+      case '-s':
+        options.startDate = args[++i] || '';
+        break;
+      case '--end':
+      case '-e':
+        options.endDate = args[++i] || '';
+        break;
+      case '--type':
+      case '-t':
+        options.type = args[++i] || 'all';
+        break;
+      case '--customer-id':
+        options.customerId = args[++i] || '';
+        break;
+      case '--cookie-path':
+        options.cookiePath = args[++i] || CONFIG.cookiePath;
+        break;
+      case '--report-template':
+        options.reportTemplatePath = args[++i] || CONFIG.reportTemplatePath;
+        break;
+      case '--page-size':
+        options.pageSize = parseInt(args[++i]) || CONFIG.defaultPageSize;
+        break;
+      case '--manage-sub-type-map-file':
+        options.manageSubTypeMapFile = args[++i] || '';
+        break;
+      case '--asset-map-file':
+        options.assetMapFile = args[++i] || '';
+        break;
+      case '--response-only':
+      case '--debug-response':
+        options.responseOnly = true;
+        break;
+      case '--help':
+      case '-h':
+        showHelp();
+        process.exit(0);
+    }
+  }
+  
+  return options;
+}
+
+/**
+ * 显示帮助信息
+ */
+function showHelp() {
+  console.log(`
+深信服报告下载器 - 帮助信息
+============================
+
+用法:
+  node sangfor_downloader.js [选项]
+
+选项:
+  --customer, -c <名称>    客户名称
+  --start, -s <日期>       开始日期 (格式: YYYY-MM-DD)
+  --end, -e <日期>         结束日期 (格式: YYYY-MM-DD)
+  --type, -t <类型>        报告类型: all(默认), asset, event, alarm, vuln
+  --customer-id <ID>       客户ID (可选)
+  --cookie-path <路径>     Cookie 文件路径 (默认: 当前目录 cookies.txt，也可用 SANGFOR_COOKIE_PATH)
+  --page-size <大小>       每页数量 (默认: 100)
+  --manage-sub-type-map-file <路径> manage_sub_type 映射文件（默认 ./data/manage_sub_type_map.json）
+  --asset-map-file <路径>  资产IP与安全域映射文件（默认 ./data/asset.xlsx，支持 xlsx/json）
+  --response-only          只请求第一页并保存原始 response JSON，不生成 Excel
+  --help, -h               显示帮助信息
+
+示例:
+  node sangfor_downloader.js -c "测试客户" -s "2024-01-01" -e "2024-01-31"
+  node sangfor_downloader.js --customer-id 26912728 --start "2026-05-12" --end "2026-05-13"
+  node sangfor_downloader.js --response-only --customer-id 26912728 --start "2026-05-12" --end "2026-05-13"
+  `);
+}
+
+/**
+ * 交互式获取参数
+ */
+async function interactiveInput() {
+  const readline = require('readline');
+  
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+  
+  const question = (prompt) => new Promise((resolve) => {
+    rl.question(prompt, resolve);
+  });
+  
+  console.log('\n===== 深信服报告下载器 =====\n');
+  
+  try {
+    const customer = await question('客户名称: ');
+    const startDate = await question('开始日期 (YYYY-MM-DD): ');
+    const endDate = await question('结束日期 (YYYY-MM-DD): ');
+    const type = await question('报告类型 (all/asset/event/alarm/vuln, 默认all): ');
+    
+    return {
+      customer: customer.trim(),
+      startDate: startDate.trim(),
+      endDate: endDate.trim(),
+      type: (type.trim() || 'all').toLowerCase(),
+      customerId: '',
+      responseOnly: false,
+      cookiePath: CONFIG.cookiePath,
+      manageSubTypeMapFile: process.env.SANGFOR_MANAGE_SUB_TYPE_MAP_FILE || path.join(__dirname, 'data', 'manage_sub_type_map.json'),
+      assetMapFile: process.env.SANGFOR_ASSET_MAP_FILE || path.join(__dirname, 'data', 'asset.xlsx')
+    };
+  } finally {
+    rl.close();
+  }
+}
+
+function sanitizeFilePart(value) {
+  return String(value || 'unknown').replace(/[\\/:*?"<>|]/g, '_');
+}
+
+function saveJsonResponse(type, response, options) {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
+  const fileName = `${sanitizeFilePart(options.customer || options.customerId)}_${type}_response_${timestamp}.json`;
+  const filePath = path.join(CONFIG.outputDir, fileName);
+
+  fs.writeFileSync(filePath, JSON.stringify(response, null, 2), 'utf8');
+  console.log(`[调试] ${type} 原始 response 已保存: ${filePath}`);
+
+  return filePath;
+}
+
+async function fetchAndSaveFirstResponse(cookieInfo, requestParams, options) {
+  const files = [];
+  const targets = options.type === 'all' ? ['asset', 'event', 'alarm', 'vuln'] : [options.type];
+
+  for (const target of targets) {
+    if (target === 'asset') {
+      console.log(`\n--- 获取 资产表导出 response ---`);
+      const response = await requestWithRetry(
+        (params) => apiClient.fetchAssetDownloadInfo(cookieInfo, params),
+        requestParams
+      );
+      files.push(saveJsonResponse(target, response, options));
+      continue;
+    }
+
+    const fetchFunc = target === 'alarm'
+      ? apiClient.fetchAlarmTable
+      : target === 'vuln'
+        ? apiClient.fetchVulnTable
+        : apiClient.fetchEventTable;
+    const displayName = target === 'alarm' ? '告警表' : target === 'vuln' ? '资产漏洞表' : '事件表';
+    console.log(`\n--- 获取 ${displayName} 首页 response ---`);
+    const response = await requestWithRetry(
+      (params) => fetchFunc(cookieInfo, { ...params, page: 1 }),
+      requestParams
+    );
+    files.push(saveJsonResponse(target, response, options));
+  }
+
+  return files;
+}
+
+/**
+ * 验证日期格式
+ */
+function validateDate(dateStr) {
+  if (!dateStr) return true; // 空日期可能允许
+  const regex = /^\d{4}-\d{2}-\d{2}$/;
+  if (!regex.test(dateStr)) {
+    throw new Error(`日期格式错误: ${dateStr}，正确格式: YYYY-MM-DD`);
+  }
+  return true;
+}
+
+/**
+ * 等待用户按回车继续
+ */
+function waitForContinue() {
+  return new Promise((resolve) => {
+    const rl = readline.createInterface({ input: process.stdin });
+    rl.question('\n按回车键继续...', () => {
+      rl.close();
+      resolve();
+    });
+  });
+}
+
+/**
+ * 带重试的请求
+ */
+async function requestWithRetry(requestFunc, options, maxRetries = CONFIG.maxRetries) {
+  let lastError;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`[主程序] 第 ${attempt} 次尝试...`);
+      return await requestFunc(options);
+    } catch (error) {
+      lastError = error;
+      console.warn(`[主程序] 第 ${attempt} 次尝试失败: ${error.message}`);
+      
+      if (attempt < maxRetries) {
+        console.log(`[主程序] ${CONFIG.retryDelay/1000} 秒后重试...`);
+        await new Promise(r => setTimeout(r, CONFIG.retryDelay));
+      }
+    }
+  }
+  
+  throw lastError;
+}
+
+/**
+ * 主下载流程
+ */
+async function downloadReports(options) {
+  console.log('\n========================================');
+  console.log('   深信服报告下载器');
+  console.log('========================================\n');
+  
+  const startTime = Date.now();
+  
+  try {
+    // 1. 读取 Cookie
+    console.log('[步骤 1/5] 读取 Cookie...');
+    const cookieInfo = cookieReader.getCookieInfo(options.cookiePath || CONFIG.cookiePath);
+    
+    if (!cookieInfo.validation.valid) {
+      console.warn(`[警告] Cookie 可能不完整，缺失字段: ${cookieInfo.validation.missing.join(', ')}`);
+      console.warn('[警告] 继续执行，但如果请求失败请重新登录获取 Cookie');
+    }
+    
+    // 2. 验证日期参数
+    console.log('\n[步骤 2/5] 验证参数...');
+    validateDate(options.startDate);
+    validateDate(options.endDate);
+    console.log(`[参数] 客户: ${options.customer || '未指定'}`);
+    console.log(`[参数] 客户ID(输入): ${options.customerId || '未指定'}`);
+    console.log(`[参数] 时间: ${options.startDate} ~ ${options.endDate}`);
+    console.log(`[参数] 类型: ${options.type}`);
+
+    let resolvedCustomerId = options.customerId || '';
+    if (!resolvedCustomerId) {
+      if (!options.customer) {
+        throw new Error('缺少客户信息。请至少提供 --customer 中文公司名称，或直接提供 --customer-id。');
+      }
+      console.log('[步骤 2.5/5] 解析客户ID...');
+      resolvedCustomerId = await apiClient.resolveCompanyIdByName(
+        cookieInfo,
+        options.customer,
+        { pageSize: 100, keyword: '' }
+      );
+      console.log(`[参数] 客户ID(解析): ${resolvedCustomerId}`);
+    }
+    
+    // 3. 准备请求参数
+    const requestParams = {
+      customerId: resolvedCustomerId,
+      customerName: options.customer,
+      startTime: options.startDate,
+      endTime: options.endDate,
+      pageSize: options.pageSize
+    };
+
+    if (options.responseOnly) {
+      console.log('\n[调试模式] 只获取第一页 response，不生成 Excel。');
+      const files = await fetchAndSaveFirstResponse(cookieInfo, requestParams, options);
+      return {
+        success: true,
+        files: files.map(filePath => ({ type: 'response', path: filePath, name: path.basename(filePath), rowCount: 0 })),
+        errors: []
+      };
+    }
+    
+    const results = {
+      assetWorkbookBuffer: null,
+      eventData: null,
+      alarmData: null,
+      vulnData: null,
+      assetError: null,
+      eventError: null,
+      alarmError: null,
+      vulnError: null
+    };
+    
+    // 4. 下载数据
+    console.log('\n[步骤 3/5] 下载数据...');
+
+    if (options.type === 'asset' || options.type === 'event' || options.type === 'vuln' || options.type === 'all') {
+      console.log('\n--- 下载资产表 ---');
+      try {
+        const assetFile = await requestWithRetry(
+          (params) => apiClient.fetchAssetTableFile(cookieInfo, params),
+          requestParams
+        );
+        results.assetWorkbookBuffer = assetFile.buffer;
+        console.log(`[成功] 资产表: 已下载，稍后写入总报告`);
+      } catch (error) {
+        results.assetError = error.message;
+        console.error(`[失败] 资产表: ${error.message}`);
+      }
+    }
+
+    const runtimeAssetMapFile = results.assetWorkbookBuffer ? null : options.assetMapFile;
+    
+    if (options.type === 'event' || options.type === 'all') {
+      console.log('\n--- 下载事件表 ---');
+      try {
+        results.eventData = await requestWithRetry(
+          (params) => apiClient.fetchAllPages(apiClient.fetchEventTable, cookieInfo, params, 'data'),
+          requestParams
+        );
+        console.log(`[成功] 事件表: ${results.eventData.length} 条记录`);
+      } catch (error) {
+        results.eventError = error.message;
+        console.error(`[失败] 事件表: ${error.message}`);
+      }
+    }
+
+    
+    if (options.type === 'alarm' || options.type === 'all') {
+      console.log('\n--- 下载告警表 ---');
+      try {
+        results.alarmData = await requestWithRetry(
+          (params) => apiClient.fetchAllPages(apiClient.fetchAlarmTable, cookieInfo, params, 'data'),
+          requestParams
+        );
+        console.log(`[成功] 告警表: ${results.alarmData.length} 条记录`);
+      } catch (error) {
+        results.alarmError = error.message;
+        console.error(`[失败] 告警表: ${error.message}`);
+      }
+    }
+
+    if (options.type === 'vuln' || options.type === 'all') {
+      console.log('\n--- 下载资产漏洞表 ---');
+      try {
+        results.vulnData = await requestWithRetry(
+          (params) => apiClient.fetchAllPages(apiClient.fetchVulnTable, cookieInfo, params, 'data'),
+          requestParams
+        );
+        console.log(`[成功] 资产漏洞表: ${results.vulnData.length} 条记录`);
+      } catch (error) {
+        results.vulnError = error.message;
+        console.error(`[失败] 资产漏洞表: ${error.message}`);
+      }
+    }
+    
+    // 5. 生成报告
+    console.log('\n[步骤 4/5] 生成 Excel 报告...');
+    let dataFormatter;
+    let soarTransformer;
+    try {
+      soarTransformer = require('./soar_transformer');
+      dataFormatter = require('./data_formatter');
+    } catch (error) {
+      if (error.code === 'MODULE_NOT_FOUND' && error.message.includes('xlsx')) {
+        throw new Error('缺少 xlsx 依赖。请在当前目录执行 npm install 后重试。');
+      }
+      throw error;
+    }
+    const transformedEventData = results.eventData
+      ? soarTransformer.transformEventDocs(results.eventData, {
+        manageSubTypeMapFile: options.manageSubTypeMapFile,
+        assetMapFile: runtimeAssetMapFile,
+        assetWorkbookBuffer: results.assetWorkbookBuffer
+      })
+      : null;
+    const transformedAlarmData = results.alarmData
+      ? soarTransformer.transformAlarmDocs(results.alarmData, {
+        manageSubTypeMapFile: options.manageSubTypeMapFile
+      })
+      : null;
+    const transformedVulnData = results.vulnData
+      ? soarTransformer.transformVulnDocs(results.vulnData, {
+        assetMapFile: runtimeAssetMapFile,
+        assetWorkbookBuffer: results.assetWorkbookBuffer
+      })
+      : null;
+
+    const reportResult = dataFormatter.generateReport({
+      customer: options.customer,
+      customerId: resolvedCustomerId,
+      startDate: options.startDate,
+      endDate: options.endDate,
+      assetWorkbookBuffer: results.assetWorkbookBuffer,
+      reportTemplatePath: options.reportTemplatePath,
+      eventData: transformedEventData,
+      alarmData: transformedAlarmData,
+      vulnData: transformedVulnData,
+      outputDir: CONFIG.outputDir,
+      eventHeaders: soarTransformer.EVENT_OUTPUT_FIELDS,
+      alarmHeaders: soarTransformer.ALARM_OUTPUT_FIELDS,
+      vulnHeaders: soarTransformer.VULN_OUTPUT_FIELDS,
+      eventHeaderDisplayMap: EVENT_HEADER_DISPLAY_MAP,
+      alarmHeaderDisplayMap: ALARM_HEADER_DISPLAY_MAP
+    });
+
+    // 6. 完成
+    console.log('\n[步骤 5/5] 完成！');
+    
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(2);
+    
+    console.log('\n========================================');
+    console.log('   执行结果');
+    console.log('========================================');
+    console.log(`耗时: ${elapsed} 秒`);
+    console.log(`成功: ${reportResult.success ? '是' : '否'}`);
+    
+    if (reportResult.files.length > 0) {
+      console.log('\n生成的文件:');
+      reportResult.files.forEach((f, i) => {
+        console.log(`  ${i + 1}. ${f.name}`);
+        console.log(`     路径: ${f.path}`);
+        console.log(`     行数: ${f.rowCount}`);
+        if (Array.isArray(f.sheets)) {
+          f.sheets.forEach(sheet => {
+            console.log(`     - ${sheet.name}: ${sheet.rowCount} 行`);
+          });
+        }
+      });
+    }
+    
+    if (reportResult.errors.length > 0) {
+      console.log('\n错误:');
+      reportResult.errors.forEach((e, i) => {
+        console.log(`  ${i + 1}. ${e}`);
+      });
+    }
+    
+    // 输出未下载部分的错误
+    if (results.assetError || results.eventError || results.alarmError || results.vulnError) {
+      console.log('\n下载详情:');
+      console.log(`  资产表: ${results.assetWorkbookBuffer ? '成功' : '失败 - ' + results.assetError}`);
+      console.log(`  事件表: ${results.eventData ? '成功 (' + results.eventData.length + '条)' : '失败 - ' + results.eventError}`);
+      console.log(`  告警表: ${results.alarmData ? '成功 (' + results.alarmData.length + '条)' : '失败 - ' + results.alarmError}`);
+      console.log(`  资产漏洞表: ${results.vulnData ? '成功 (' + results.vulnData.length + '条)' : '失败 - ' + results.vulnError}`);
+    }
+    
+    console.log('\n========================================\n');
+    
+    return reportResult;
+    
+  } catch (error) {
+    console.error('\n[错误] 执行失败:', error.message);
+    console.error('[错误] 详细信息:', error.stack);
+    throw error;
+  }
+}
+
+/**
+ * 入口函数
+ */
+async function main() {
+  try {
+    // 解析参数
+    const args = parseArgs();
+    
+    // 如果没有参数，进入交互模式
+    const hasCliArgs = process.argv.slice(2).length > 0;
+    const options = hasCliArgs
+      ? args
+      : await interactiveInput();
+    
+    // 执行下载
+    await downloadReports(options);
+    
+  } catch (error) {
+    console.error('\n[致命错误]', error.message);
+    process.exit(1);
+  }
+}
+
+// 如果是直接运行此脚本
+if (require.main === module) {
+  main();
+}
+
+// 导出供外部调用
+module.exports = {
+  downloadReports,
+  CONFIG,
+  parseArgs
+};

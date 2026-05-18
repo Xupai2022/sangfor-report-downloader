@@ -1,0 +1,15 @@
+{
+  "name": "sangfor-report-downloader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Download Sangfor SOAR event and alarm table data, then export xlsx reports.",
+  "main": "sangfor_downloader.js",
+  "scripts": {
+    "response:event": "node sangfor_downloader.js --response-only --type event",
+    "response:alarm": "node sangfor_downloader.js --response-only --type alarm",
+    "start": "node sangfor_downloader.js"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}
