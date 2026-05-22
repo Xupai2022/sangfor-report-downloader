@@ -1,6 +1,6 @@
 /**
  * 深信服报告下载器 - 主脚本
- * 自动下载指定客户、指定时间段的【资产表】、【事件表】、【告警表】和【资产漏洞表】Excel数据
+ * 自动下载指定客户、指定时间段的【资产表】、【暴露面】、【事件表】、【告警表】和【资产漏洞表】Excel数据
  * 
  * 使用方法:
  *   node sangfor_downloader.js                                    # 交互式
@@ -9,6 +9,7 @@
  *   node sangfor_downloader.js --type event                       # 只下载事件表
  *   node sangfor_downloader.js --type alarm                       # 只下载告警表
  *   node sangfor_downloader.js --type vuln                        # 只下载资产漏洞表
+ *   node sangfor_downloader.js --type exposed                     # 只下载暴露面
  */
 
 const path = require('path');
@@ -18,25 +19,30 @@ const fs = require('fs');
 const cookieReader = require('./cookie_reader');
 const apiClient = require('./api_client');
 
+const DEFAULT_REPORT_TEMPLATE_PATH = path.join(__dirname, 'data.xlsx');
+
 // 配置
 const CONFIG = {
   // Cookie 文件路径 (由浏览器插件生成)
   cookiePath: process.env.SANGFOR_COOKIE_PATH || path.join(__dirname, 'cookies.txt'),
 
   // 报告模板路径
-  reportTemplatePath: process.env.SANGFOR_REPORT_TEMPLATE_PATH || 'M:\\Device\\C\\Users\\xupai\\.openclaw\\workspace\\skills\\sangfor-report-downloader\\data.xlsx',
+  reportTemplatePath: process.env.SANGFOR_REPORT_TEMPLATE_PATH || DEFAULT_REPORT_TEMPLATE_PATH,
   
   // 输出目录
-  outputDir: process.cwd(),
+  outputDir: __dirname,
   
   // 默认请求参数
   defaultPageSize: 100,
+  defaultVulnPageSize: 50,
+  defaultPageDelayMs: 10,
   maxRetries: 3,
   retryDelay: 2000
 };
 
 const EVENT_HEADER_DISPLAY_MAP = {
   event_grading_tag: '事件类型',
+  event_name: '事件名称',
   create_time: '事件创建时间',
   type: '类型',
   host_ip: '主机 IP',
@@ -72,6 +78,38 @@ const ALARM_HEADER_DISPLAY_MAP = {
   reject_reason: '驳回原因'
 };
 
+function normalizeReportType(type) {
+  const normalized = String(type || 'all').trim().toLowerCase();
+  const aliases = {
+    exposure: 'exposed',
+    exposed_surface: 'exposed',
+    exposed_surface_mss: 'exposed',
+    surface: 'exposed',
+    expose: 'exposed',
+    '暴露面': 'exposed',
+    '漏洞': 'vuln'
+  };
+  return aliases[normalized] || normalized || 'all';
+}
+
+function shouldFetchType(selectedType, targetType) {
+  return selectedType === 'all' || selectedType === targetType;
+}
+
+function resolvePageSizeForTarget(targetType, options) {
+  if (targetType === 'vuln' && !options.pageSizeProvided) {
+    return CONFIG.defaultVulnPageSize;
+  }
+  return options.pageSize;
+}
+
+function validateReportType(type) {
+  const allowed = ['all', 'asset', 'event', 'alarm', 'vuln', 'exposed'];
+  if (!allowed.includes(type)) {
+    throw new Error(`报告类型错误: ${type}，可选值: ${allowed.join(', ')}`);
+  }
+}
+
 /**
  * 解析命令行参数
  */
@@ -84,8 +122,11 @@ function parseArgs() {
     type: 'all',  // all, asset, event, alarm, vuln
     customerId: '',
     pageSize: CONFIG.defaultPageSize,
+    pageSizeProvided: false,
+    pageDelayMs: CONFIG.defaultPageDelayMs,
     responseOnly: false,
     cookiePath: CONFIG.cookiePath,
+    outputDir: CONFIG.outputDir,
     reportTemplatePath: CONFIG.reportTemplatePath,
     manageSubTypeMapFile: process.env.SANGFOR_MANAGE_SUB_TYPE_MAP_FILE || path.join(__dirname, 'data', 'manage_sub_type_map.json'),
     assetMapFile: process.env.SANGFOR_ASSET_MAP_FILE || path.join(__dirname, 'data', 'asset.xlsx')
@@ -109,7 +150,7 @@ function parseArgs() {
         break;
       case '--type':
       case '-t':
-        options.type = args[++i] || 'all';
+        options.type = normalizeReportType(args[++i] || 'all');
         break;
       case '--customer-id':
         options.customerId = args[++i] || '';
@@ -117,11 +158,21 @@ function parseArgs() {
       case '--cookie-path':
         options.cookiePath = args[++i] || CONFIG.cookiePath;
         break;
+      case '--output-dir':
+        options.outputDir = args[++i] || CONFIG.outputDir;
+        break;
       case '--report-template':
         options.reportTemplatePath = args[++i] || CONFIG.reportTemplatePath;
         break;
       case '--page-size':
         options.pageSize = parseInt(args[++i]) || CONFIG.defaultPageSize;
+        options.pageSizeProvided = true;
+        break;
+      case '--page-delay-ms':
+        options.pageDelayMs = parseInt(args[++i]);
+        if (!Number.isFinite(options.pageDelayMs) || options.pageDelayMs < 0) {
+          options.pageDelayMs = CONFIG.defaultPageDelayMs;
+        }
         break;
       case '--manage-sub-type-map-file':
         options.manageSubTypeMapFile = args[++i] || '';
@@ -140,6 +191,7 @@ function parseArgs() {
     }
   }
   
+  options.type = normalizeReportType(options.type);
   return options;
 }
 
@@ -158,10 +210,12 @@ function showHelp() {
   --customer, -c <名称>    客户名称
   --start, -s <日期>       开始日期 (格式: YYYY-MM-DD)
   --end, -e <日期>         结束日期 (格式: YYYY-MM-DD)
-  --type, -t <类型>        报告类型: all(默认), asset, event, alarm, vuln
+  --type, -t <类型>        报告类型: all(默认), asset, event, alarm, vuln, exposed
   --customer-id <ID>       客户ID (可选)
   --cookie-path <路径>     Cookie 文件路径 (默认: 当前目录 cookies.txt，也可用 SANGFOR_COOKIE_PATH)
-  --page-size <大小>       每页数量 (默认: 100)
+  --output-dir <路径>      输出目录 (默认: 脚本所在目录)
+  --page-size <大小>       每页数量 (默认: 100，资产漏洞表默认: 50)
+  --page-delay-ms <毫秒>   每页请求后的等待时间 (默认: 10)
   --manage-sub-type-map-file <路径> manage_sub_type 映射文件（默认 ./data/manage_sub_type_map.json）
   --asset-map-file <路径>  资产IP与安全域映射文件（默认 ./data/asset.xlsx，支持 xlsx/json）
   --response-only          只请求第一页并保存原始 response JSON，不生成 Excel
@@ -195,16 +249,20 @@ async function interactiveInput() {
     const customer = await question('客户名称: ');
     const startDate = await question('开始日期 (YYYY-MM-DD): ');
     const endDate = await question('结束日期 (YYYY-MM-DD): ');
-    const type = await question('报告类型 (all/asset/event/alarm/vuln, 默认all): ');
+    const type = await question('报告类型 (all/asset/event/alarm/vuln/exposed, 默认all): ');
     
     return {
       customer: customer.trim(),
       startDate: startDate.trim(),
       endDate: endDate.trim(),
-      type: (type.trim() || 'all').toLowerCase(),
+      type: normalizeReportType(type.trim() || 'all'),
       customerId: '',
+      pageSize: CONFIG.defaultPageSize,
+      pageSizeProvided: false,
+      pageDelayMs: CONFIG.defaultPageDelayMs,
       responseOnly: false,
       cookiePath: CONFIG.cookiePath,
+      outputDir: CONFIG.outputDir,
       manageSubTypeMapFile: process.env.SANGFOR_MANAGE_SUB_TYPE_MAP_FILE || path.join(__dirname, 'data', 'manage_sub_type_map.json'),
       assetMapFile: process.env.SANGFOR_ASSET_MAP_FILE || path.join(__dirname, 'data', 'asset.xlsx')
     };
@@ -230,7 +288,7 @@ function saveJsonResponse(type, response, options) {
 
 async function fetchAndSaveFirstResponse(cookieInfo, requestParams, options) {
   const files = [];
-  const targets = options.type === 'all' ? ['asset', 'event', 'alarm', 'vuln'] : [options.type];
+  const targets = options.type === 'all' ? ['asset', 'exposed', 'event', 'alarm', 'vuln'] : [options.type];
 
   for (const target of targets) {
     if (target === 'asset') {
@@ -243,6 +301,22 @@ async function fetchAndSaveFirstResponse(cookieInfo, requestParams, options) {
       continue;
     }
 
+    if (target === 'exposed') {
+      console.log(`\n--- 获取 暴露面目标公司与导出 response ---`);
+      const optionResponse = await requestWithRetry(
+        (params) => apiClient.fetchExposedTargetCompanyOptions(cookieInfo, params),
+        requestParams
+      );
+      files.push(saveJsonResponse('exposed_target_company_option', optionResponse, options));
+
+      const exportResponse = await requestWithRetry(
+        (params) => apiClient.fetchExposedSurfaceExportInfo(cookieInfo, params),
+        requestParams
+      );
+      files.push(saveJsonResponse('exposed_export', exportResponse, options));
+      continue;
+    }
+
     const fetchFunc = target === 'alarm'
       ? apiClient.fetchAlarmTable
       : target === 'vuln'
@@ -251,7 +325,11 @@ async function fetchAndSaveFirstResponse(cookieInfo, requestParams, options) {
     const displayName = target === 'alarm' ? '告警表' : target === 'vuln' ? '资产漏洞表' : '事件表';
     console.log(`\n--- 获取 ${displayName} 首页 response ---`);
     const response = await requestWithRetry(
-      (params) => fetchFunc(cookieInfo, { ...params, page: 1 }),
+      (params) => fetchFunc(cookieInfo, {
+        ...params,
+        page: 1,
+        pageSize: resolvePageSizeForTarget(target, options)
+      }),
       requestParams
     );
     files.push(saveJsonResponse(target, response, options));
@@ -333,6 +411,8 @@ async function downloadReports(options) {
     console.log('\n[步骤 2/5] 验证参数...');
     validateDate(options.startDate);
     validateDate(options.endDate);
+    options.type = normalizeReportType(options.type);
+    validateReportType(options.type);
     console.log(`[参数] 客户: ${options.customer || '未指定'}`);
     console.log(`[参数] 客户ID(输入): ${options.customerId || '未指定'}`);
     console.log(`[参数] 时间: ${options.startDate} ~ ${options.endDate}`);
@@ -347,7 +427,7 @@ async function downloadReports(options) {
       resolvedCustomerId = await apiClient.resolveCompanyIdByName(
         cookieInfo,
         options.customer,
-        { pageSize: 100, keyword: '' }
+        { pageSize: 100, keyword: '', pageDelayMs: options.pageDelayMs }
       );
       console.log(`[参数] 客户ID(解析): ${resolvedCustomerId}`);
     }
@@ -358,7 +438,8 @@ async function downloadReports(options) {
       customerName: options.customer,
       startTime: options.startDate,
       endTime: options.endDate,
-      pageSize: options.pageSize
+      pageSize: options.pageSize,
+      pageDelayMs: options.pageDelayMs
     };
 
     if (options.responseOnly) {
@@ -373,10 +454,12 @@ async function downloadReports(options) {
     
     const results = {
       assetWorkbookBuffer: null,
+      exposedSurfaceWorkbookBuffer: null,
       eventData: null,
       alarmData: null,
       vulnData: null,
       assetError: null,
+      exposedSurfaceError: null,
       eventError: null,
       alarmError: null,
       vulnError: null
@@ -385,7 +468,7 @@ async function downloadReports(options) {
     // 4. 下载数据
     console.log('\n[步骤 3/5] 下载数据...');
 
-    if (options.type === 'asset' || options.type === 'event' || options.type === 'vuln' || options.type === 'all') {
+    if (shouldFetchType(options.type, 'asset') || shouldFetchType(options.type, 'event') || shouldFetchType(options.type, 'vuln')) {
       console.log('\n--- 下载资产表 ---');
       try {
         const assetFile = await requestWithRetry(
@@ -401,8 +484,23 @@ async function downloadReports(options) {
     }
 
     const runtimeAssetMapFile = results.assetWorkbookBuffer ? null : options.assetMapFile;
+
+    if (shouldFetchType(options.type, 'exposed')) {
+      console.log('\n--- 下载暴露面 ---');
+      try {
+        const exposedSurfaceFile = await requestWithRetry(
+          (params) => apiClient.fetchExposedSurfaceFile(cookieInfo, params),
+          requestParams
+        );
+        results.exposedSurfaceWorkbookBuffer = exposedSurfaceFile.buffer;
+        console.log(`[成功] 暴露面: 已下载，稍后写入总报告`);
+      } catch (error) {
+        results.exposedSurfaceError = error.message;
+        console.error(`[失败] 暴露面: ${error.message}`);
+      }
+    }
     
-    if (options.type === 'event' || options.type === 'all') {
+    if (shouldFetchType(options.type, 'event')) {
       console.log('\n--- 下载事件表 ---');
       try {
         results.eventData = await requestWithRetry(
@@ -417,7 +515,7 @@ async function downloadReports(options) {
     }
 
     
-    if (options.type === 'alarm' || options.type === 'all') {
+    if (shouldFetchType(options.type, 'alarm')) {
       console.log('\n--- 下载告警表 ---');
       try {
         results.alarmData = await requestWithRetry(
@@ -431,11 +529,14 @@ async function downloadReports(options) {
       }
     }
 
-    if (options.type === 'vuln' || options.type === 'all') {
+    if (shouldFetchType(options.type, 'vuln')) {
       console.log('\n--- 下载资产漏洞表 ---');
       try {
         results.vulnData = await requestWithRetry(
-          (params) => apiClient.fetchAllPages(apiClient.fetchVulnTable, cookieInfo, params, 'data'),
+          (params) => apiClient.fetchAllPages(apiClient.fetchVulnTable, cookieInfo, {
+            ...params,
+            pageSize: resolvePageSizeForTarget('vuln', options)
+          }, 'data'),
           requestParams
         );
         console.log(`[成功] 资产漏洞表: ${results.vulnData.length} 条记录`);
@@ -458,13 +559,14 @@ async function downloadReports(options) {
       }
       throw error;
     }
-    const transformedEventData = results.eventData
-      ? soarTransformer.transformEventDocs(results.eventData, {
+    const transformedEventResult = results.eventData
+      ? soarTransformer.transformEventDocsWithStats(results.eventData, {
         manageSubTypeMapFile: options.manageSubTypeMapFile,
         assetMapFile: runtimeAssetMapFile,
         assetWorkbookBuffer: results.assetWorkbookBuffer
       })
       : null;
+    const transformedEventData = transformedEventResult ? transformedEventResult.rows : null;
     const transformedAlarmData = results.alarmData
       ? soarTransformer.transformAlarmDocs(results.alarmData, {
         manageSubTypeMapFile: options.manageSubTypeMapFile
@@ -483,11 +585,14 @@ async function downloadReports(options) {
       startDate: options.startDate,
       endDate: options.endDate,
       assetWorkbookBuffer: results.assetWorkbookBuffer,
+      exposedSurfaceWorkbookBuffer: results.exposedSurfaceWorkbookBuffer,
       reportTemplatePath: options.reportTemplatePath,
       eventData: transformedEventData,
+      eventStats: transformedEventResult ? transformedEventResult.stats : null,
       alarmData: transformedAlarmData,
       vulnData: transformedVulnData,
-      outputDir: CONFIG.outputDir,
+      vulnRawRowCount: Array.isArray(results.vulnData) ? results.vulnData.length : null,
+      outputDir: options.outputDir || CONFIG.outputDir,
       eventHeaders: soarTransformer.EVENT_OUTPUT_FIELDS,
       alarmHeaders: soarTransformer.ALARM_OUTPUT_FIELDS,
       vulnHeaders: soarTransformer.VULN_OUTPUT_FIELDS,
@@ -514,7 +619,14 @@ async function downloadReports(options) {
         console.log(`     行数: ${f.rowCount}`);
         if (Array.isArray(f.sheets)) {
           f.sheets.forEach(sheet => {
-            console.log(`     - ${sheet.name}: ${sheet.rowCount} 行`);
+            if (
+              sheet.name === '资产漏洞表' &&
+              Number.isInteger(sheet.rawRowCount)
+            ) {
+              console.log(`     - ${sheet.name}: ${sheet.rawRowCount} 条原始记录，${sheet.rowCount} 条 Excel 明细行`);
+            } else {
+              console.log(`     - ${sheet.name}: ${sheet.rowCount} 行`);
+            }
           });
         }
       });
@@ -528,9 +640,10 @@ async function downloadReports(options) {
     }
     
     // 输出未下载部分的错误
-    if (results.assetError || results.eventError || results.alarmError || results.vulnError) {
+    if (results.assetError || results.exposedSurfaceError || results.eventError || results.alarmError || results.vulnError) {
       console.log('\n下载详情:');
       console.log(`  资产表: ${results.assetWorkbookBuffer ? '成功' : '失败 - ' + results.assetError}`);
+      console.log(`  暴露面: ${results.exposedSurfaceWorkbookBuffer ? '成功' : '失败 - ' + results.exposedSurfaceError}`);
       console.log(`  事件表: ${results.eventData ? '成功 (' + results.eventData.length + '条)' : '失败 - ' + results.eventError}`);
       console.log(`  告警表: ${results.alarmData ? '成功 (' + results.alarmData.length + '条)' : '失败 - ' + results.alarmError}`);
       console.log(`  资产漏洞表: ${results.vulnData ? '成功 (' + results.vulnData.length + '条)' : '失败 - ' + results.vulnError}`);

@@ -74,6 +74,25 @@ const EVENT_GRADING_TAG_DISPLAY = {
   5: '其他'
 };
 
+const STRATEGY_OPTIMIZE_MANAGE_SUB_TYPES = new Set([
+  'STRATEGY_OPTIMIZE',
+  'EDR_STRATEGY_OPTIMIZE',
+  'SIP_STRATEGY_OPTIMIZE',
+  'AF_STRATEGY_OPTIMIZE',
+  'TSS_STRATEGY_OPTIMIZE',
+  'CWPP_STRATEGY_OPTIMIZE',
+  'NTA_STRATEGY_OPTIMIZE'
+]);
+
+const EVENT_GRADING_TAG_5_MANAGE_TYPE_RULES = {
+  INTRANET_THREAT: '一般事件',
+  EMERGENCY_RESPONSE: '重大事件',
+  UNDECLARED_THREAT: '最新威胁',
+  '209': '一般事件',
+  INTERNET_THREAT: '一般威胁',
+  VULNERABILITY: '重大威胁'
+};
+
 const PUSH_STATUS_DISPLAY = {
   1: '已通告',
   '-1': '未通告'
@@ -129,6 +148,7 @@ const EVENT_OUTPUT_FIELDS = [
   'event_grading_tag',
   'create_time',
   'type',
+  'event_name',
   'host_ip',
   '内网外网资产',
   'event_status',
@@ -169,9 +189,8 @@ const ALARM_OUTPUT_FIELDS = [
 ];
 
 const VULN_OUTPUT_FIELDS = [
-  '序号',
   '漏洞名称',
-  '责任人',
+  '漏洞等级',
   '受影响主机/位置',
   'IP',
   '内/外网',
@@ -191,6 +210,12 @@ const VULN_STATUS_DISPLAY = {
   9: '修复失败',
   10: '已搁置',
   11: '已加白'
+};
+
+const VULN_LEVEL_DISPLAY = {
+  0: '低危',
+  1: '中危',
+  2: '高危'
 };
 
 function loadManageSubTypeMap(filePath) {
@@ -223,8 +248,8 @@ function loadAssetSecurityDomainMap(filePath) {
     if (Array.isArray(payload)) {
       for (const item of payload) {
         if (!item) continue;
-        const ip = item.asset || item.ip || item.host_ip || item['*IP/URL'] || item['IP/URL'] || item['资产IP/URL'];
-        const domain = item.security_domain || item.domain || item.securityDomain || item['内网外网资产'] || item['安全域'];
+        const ip = item['*IP/URL'];
+        const domain = item['安全域'];
         if (ip) {
           for (const candidateIp of extractHostIpCandidates(String(ip))) {
             map[candidateIp] = domain ? String(domain).trim() : '';
@@ -247,20 +272,38 @@ function loadAssetSecurityDomainMap(filePath) {
   }
 }
 
+function addAssetSecurityDomainMapping(map, ipValue, domainValue) {
+  if (!ipValue) return;
+  const domain = domainValue ? String(domainValue).trim() : '';
+  for (const candidateIp of extractHostIpCandidates(String(ipValue))) {
+    map[candidateIp] = domain;
+  }
+}
+
+function loadAssetSecurityDomainMapFromSheet(ws) {
+  const map = {};
+  if (!ws) return map;
+
+  const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+  const headerRowIndex = 1;
+  const headerRow = rows[headerRowIndex] || [];
+  const ipIndex = headerRow.findIndex(value => value === '*IP/URL');
+  const domainIndex = headerRow.findIndex(value => value === '安全域');
+  if (ipIndex < 0 || domainIndex < 0) return map;
+
+  for (const row of rows.slice(headerRowIndex + 1)) {
+    addAssetSecurityDomainMapping(map, row[ipIndex], row[domainIndex]);
+  }
+
+  return map;
+}
+
 function loadAssetSecurityDomainMapFromWorkbook(wb) {
   const map = {};
   if (!wb || !Array.isArray(wb.SheetNames)) return map;
   for (const name of wb.SheetNames) {
     const ws = wb.Sheets[name];
-    const rows = XLSX.utils.sheet_to_json(ws, { defval: '' });
-    for (const row of rows) {
-      const ip = pickColumn(row, ['*IP/URL', 'IP/URL', '资产IP/URL', 'asset', 'ip', 'host_ip', '资产', '资产IP', 'hostIp']);
-      if (!ip) continue;
-      const domain = pickColumn(row, ['security_domain', 'securityDomain', 'domain', '内网外网资产', '安全域']);
-      for (const candidateIp of extractHostIpCandidates(String(ip))) {
-        map[candidateIp] = domain ? String(domain).trim() : '';
-      }
-    }
+    Object.assign(map, loadAssetSecurityDomainMapFromSheet(ws));
   }
   return map;
 }
@@ -274,15 +317,6 @@ function loadAssetSecurityDomainMapFromBuffer(buffer) {
     console.warn(`[Transformer] 资产 Excel buffer 映射加载失败: ${error.message}`);
     return {};
   }
-}
-
-function pickColumn(row, candidates) {
-  for (const key of candidates) {
-    if (row[key] !== undefined && row[key] !== null && String(row[key]).trim() !== '') {
-      return row[key];
-    }
-  }
-  return '';
 }
 
 function loadAssetSecurityDomainMapFromExcel(filePath) {
@@ -383,7 +417,7 @@ function parseDateTime(value) {
 }
 
 function isLatestThreat(tagValue) {
-  return typeof tagValue === 'string' && tagValue.includes(LATEST_THREAT_TYPE);
+  return typeof tagValue === 'string' && tagValue === LATEST_THREAT_TYPE;
 }
 
 function pickFirstDateTime(...values) {
@@ -497,13 +531,57 @@ function formatVulnStatus(value) {
   return VULN_STATUS_DISPLAY[key] ?? value;
 }
 
-function transformEventDoc(eventDoc, ctx) {
+function formatVulnLevel(value) {
+  const key = stringifyEnumKey(value);
+  if (key === null) return '';
+  return VULN_LEVEL_DISPLAY[key] ?? value;
+}
+
+function resolveEventGradingTag5Rule(eventDoc) {
+  if (stringifyEnumKey(eventDoc.event_grading_tag) !== '5') {
+    return { ignore: false, strategyOptimizeCount: 0 };
+  }
+
+  const manageType = stringifyEnumKey(eventDoc.manage_type);
+  const manageSubType = stringifyEnumKey(eventDoc.manage_sub_type);
+
+  if (manageType === 'MANAGEMENT') {
+    return { ignore: true, strategyOptimizeCount: 0 };
+  }
+
+  if (manageType === 'STRATEGY_OPTIMIZE') {
+    if (manageSubType === 'LOG_CHECK_EXCEPTION') {
+      return { ignore: true, strategyOptimizeCount: 0 };
+    }
+    if (manageSubType === 'DEVICE_OFFLINE') {
+      return {
+        ignore: false,
+        eventGradingTag: '业务连续性风险',
+        strategyOptimizeCount: 0
+      };
+    }
+    if (STRATEGY_OPTIMIZE_MANAGE_SUB_TYPES.has(manageSubType)) {
+      return { ignore: false, strategyOptimizeCount: 1 };
+    }
+  }
+
+  const eventGradingTag = EVENT_GRADING_TAG_5_MANAGE_TYPE_RULES[manageType];
+  if (eventGradingTag) {
+    return { ignore: false, eventGradingTag, strategyOptimizeCount: 0 };
+  }
+
+  return { ignore: false, strategyOptimizeCount: 0 };
+}
+
+function transformEventDoc(eventDoc, ctx, overrides = {}) {
   const manageTypeDisplay = EVENT_MANAGE_TYPE_DISPLAY[stringifyEnumKey(eventDoc.manage_type)] ?? eventDoc.manage_type;
   const manageSubTypeDisplay = ctx.manageSubTypeMap[stringifyEnumKey(eventDoc.manage_sub_type)] ?? eventDoc.manage_sub_type;
   const rawTag = EVENT_GRADING_TAG_DISPLAY[eventDoc.event_grading_tag] ?? eventDoc.event_grading_tag;
+  const eventGradingTag = overrides.eventGradingTag ?? rawTag;
 
   const transformed = {
-    event_grading_tag: rawTag,
+    event_grading_tag: eventGradingTag,
+    event_name: eventDoc.event_name ?? '',
     create_time: eventDoc.create_time,
     type: buildTypeDisplay(manageTypeDisplay, manageSubTypeDisplay, '->'),
     host_ip: eventDoc.host_ip,
@@ -569,7 +647,7 @@ function transformVulnDoc(vulnDoc, ctx) {
 
   return secondLevels.map((secondLevel) => ({
     漏洞名称: vulnDoc.name,
-    责任人: vulnDoc.manager,
+    漏洞等级: formatVulnLevel(vulnDoc.level),
     '受影响主机/位置': asset,
     IP: ip,
     '内/外网': resolveSecurityDomainByIp(ip, ctx.securityDomainByIp),
@@ -579,13 +657,32 @@ function transformVulnDoc(vulnDoc, ctx) {
 }
 
 function transformEventDocs(eventDocs, options = {}) {
+  return transformEventDocsWithStats(eventDocs, options).rows;
+}
+
+function transformEventDocsWithStats(eventDocs, options = {}) {
   const ctx = {
     manageSubTypeMap: loadManageSubTypeMap(options.manageSubTypeMapFile),
     securityDomainByIp: options.assetWorkbookBuffer
       ? loadAssetSecurityDomainMapFromBuffer(options.assetWorkbookBuffer)
       : loadAssetSecurityDomainMap(options.assetMapFile)
   };
-  return (eventDocs || []).map(doc => transformEventDoc(doc, ctx));
+
+  const stats = {
+    strategyOptimizeCount: 0
+  };
+  const rows = [];
+
+  for (const doc of eventDocs || []) {
+    const rule = resolveEventGradingTag5Rule(doc);
+    if (rule.ignore) continue;
+    stats.strategyOptimizeCount += rule.strategyOptimizeCount || 0;
+    rows.push(transformEventDoc(doc, ctx, {
+      eventGradingTag: rule.eventGradingTag
+    }));
+  }
+
+  return { rows, stats };
 }
 
 function transformAlarmDocs(alarmDocs, options = {}) {
@@ -602,11 +699,7 @@ function transformVulnDocs(vulnDocs, options = {}) {
       : loadAssetSecurityDomainMap(options.assetMapFile)
   };
   return (vulnDocs || [])
-    .flatMap(doc => transformVulnDoc(doc, ctx))
-    .map((row, index) => ({
-      序号: index + 1,
-      ...row
-    }));
+    .flatMap(doc => transformVulnDoc(doc, ctx));
 }
 
 module.exports = {
@@ -614,6 +707,7 @@ module.exports = {
   ALARM_OUTPUT_FIELDS,
   VULN_OUTPUT_FIELDS,
   transformEventDocs,
+  transformEventDocsWithStats,
   transformAlarmDocs,
   transformVulnDocs,
   loadManageSubTypeMap,

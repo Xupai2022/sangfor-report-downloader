@@ -1,6 +1,6 @@
 /**
  * 深信服报告下载 - API 请求封装
- * 处理事件表和告警表的接口请求
+ * 处理事件表、告警表、资产漏洞表、资产表和暴露面的接口请求
  */
 
 const https = require('https');
@@ -14,8 +14,9 @@ const API_CONFIG = {
   alarmEndpoint: '/gateway/alarm-mgr/v1/alarm_table/alarm_list',
   vulnEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/vuln_list_port_split',
   assetDownloadEndpoint: '/gateway/asset-mgr-service/order/v1/asset/download',
-  companyEndpoint: '/order/v1/user/company_simple_info',
-  uuid: 'sf-uuid-177864103164512200775'
+  exposedTargetCompanyOptionEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/exposed_surface_mss/get_target_company_option',
+  exposedExportEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/exposed_surface_mss/export_result_report',
+  companyEndpoint: '/order/v1/user/company_simple_info'
 };
 
 /**
@@ -331,6 +332,126 @@ function httpGetBuffer(url, headers = {}, redirectCount = 0) {
   });
 }
 
+function readUInt16LE(buffer, offset) {
+  if (offset + 2 > buffer.length) {
+    throw new Error('ZIP 文件结构不完整');
+  }
+  return buffer.readUInt16LE(offset);
+}
+
+function readUInt32LE(buffer, offset) {
+  if (offset + 4 > buffer.length) {
+    throw new Error('ZIP 文件结构不完整');
+  }
+  return buffer.readUInt32LE(offset);
+}
+
+function findEndOfCentralDirectory(buffer) {
+  const minOffset = Math.max(0, buffer.length - 0xffff - 22);
+  for (let offset = buffer.length - 22; offset >= minOffset; offset--) {
+    if (readUInt32LE(buffer, offset) === 0x06054b50) {
+      return offset;
+    }
+  }
+  return -1;
+}
+
+function listZipEntries(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 22) {
+    return [];
+  }
+
+  const eocdOffset = findEndOfCentralDirectory(buffer);
+  if (eocdOffset < 0) {
+    return [];
+  }
+
+  const entryCount = readUInt16LE(buffer, eocdOffset + 10);
+  const centralDirOffset = readUInt32LE(buffer, eocdOffset + 16);
+  const entries = [];
+  let offset = centralDirOffset;
+
+  for (let i = 0; i < entryCount; i++) {
+    if (offset + 46 > buffer.length || readUInt32LE(buffer, offset) !== 0x02014b50) {
+      throw new Error('ZIP 中央目录结构异常');
+    }
+
+    const flags = readUInt16LE(buffer, offset + 8);
+    const compressionMethod = readUInt16LE(buffer, offset + 10);
+    const compressedSize = readUInt32LE(buffer, offset + 20);
+    const uncompressedSize = readUInt32LE(buffer, offset + 24);
+    const fileNameLength = readUInt16LE(buffer, offset + 28);
+    const extraLength = readUInt16LE(buffer, offset + 30);
+    const commentLength = readUInt16LE(buffer, offset + 32);
+    const localHeaderOffset = readUInt32LE(buffer, offset + 42);
+    const nameStart = offset + 46;
+    const nameEnd = nameStart + fileNameLength;
+    const encoding = (flags & 0x0800) ? 'utf8' : 'utf8';
+    const fileName = buffer.slice(nameStart, nameEnd).toString(encoding);
+
+    entries.push({
+      fileName,
+      compressionMethod,
+      compressedSize,
+      uncompressedSize,
+      localHeaderOffset
+    });
+
+    offset = nameEnd + extraLength + commentLength;
+  }
+
+  return entries;
+}
+
+function extractZipEntry(buffer, entry) {
+  const offset = entry.localHeaderOffset;
+  if (offset + 30 > buffer.length || readUInt32LE(buffer, offset) !== 0x04034b50) {
+    throw new Error(`ZIP 本地文件头异常: ${entry.fileName}`);
+  }
+
+  const fileNameLength = readUInt16LE(buffer, offset + 26);
+  const extraLength = readUInt16LE(buffer, offset + 28);
+  const dataStart = offset + 30 + fileNameLength + extraLength;
+  const dataEnd = dataStart + entry.compressedSize;
+  if (dataEnd > buffer.length) {
+    throw new Error(`ZIP 文件数据不完整: ${entry.fileName}`);
+  }
+
+  const compressedData = buffer.slice(dataStart, dataEnd);
+  if (entry.compressionMethod === 0) {
+    return compressedData;
+  }
+  if (entry.compressionMethod === 8) {
+    return zlib.inflateRawSync(compressedData);
+  }
+
+  throw new Error(`不支持的 ZIP 压缩方式 ${entry.compressionMethod}: ${entry.fileName}`);
+}
+
+function extractXlsxFromZipOrSelf(buffer) {
+  const entries = listZipEntries(buffer);
+  if (!entries.length) {
+    throw new Error('下载文件不是有效的 zip/xlsx 文件');
+  }
+
+  if (entries.some(entry => entry.fileName === '[Content_Types].xml')) {
+    return buffer;
+  }
+
+  const xlsxEntry = entries.find(entry => /\.xlsx$/i.test(entry.fileName) && !entry.fileName.endsWith('/'));
+  if (!xlsxEntry) {
+    throw new Error(`zip 中未找到 xlsx 文件，包含文件: ${entries.map(entry => entry.fileName).join(', ')}`);
+  }
+
+  console.log(`[ApiClient] 从暴露面 zip 提取 xlsx: ${xlsxEntry.fileName}`);
+  const xlsxBuffer = extractZipEntry(buffer, xlsxEntry);
+  const nestedEntries = listZipEntries(xlsxBuffer);
+  if (!nestedEntries.some(entry => entry.fileName === '[Content_Types].xml')) {
+    throw new Error(`提取出的文件不是有效 xlsx: ${xlsxEntry.fileName}`);
+  }
+  return xlsxBuffer;
+}
+
 function buildVulnRequestBody(params) {
   const pageSize = params.pageSize || 100;
   const page = params.page || 1;
@@ -423,9 +544,28 @@ function buildAssetDownloadRequestBody(params) {
   };
 }
 
+function buildExposedTargetCompanyOptionRequestBody(params) {
+  return {
+    company_id: String(params.customerId || '')
+  };
+}
+
+function buildExposedExportRequestBody(params) {
+  return {
+    ops: 1,
+    asset_tag: [2, 5, 3],
+    target_company: Array.isArray(params.targetCompanyIds) ? params.targetCompanyIds : [],
+    company_id: String(params.customerId || '')
+  };
+}
+
 function buildCustomerBusinessUrl(params) {
   const companyName = encodeURIComponent(params.customerName || '');
   return `https://${API_CONFIG.baseUrl}/index.html#/customer/${params.customerId}/business?company_name=${companyName}`;
+}
+
+function buildHomeUrl() {
+  return `https://${API_CONFIG.baseUrl}/index.html`;
 }
 
 function decodeResponseBody(buffer, encoding) {
@@ -522,10 +662,8 @@ function getHasMoreFromResponse(response, rows, allDataLength, pageSize, dataKey
     if (typeof data.hasMore === 'boolean') return data.hasMore;
     if (typeof data.has_more === 'boolean') return data.has_more;
 
-    const total = getTotalFromResponse(response, dataKey);
-    if (total !== null) {
-      return allDataLength < total;
-    }
+    // Some SOAR table APIs cap or otherwise misreport total, so do not use it
+    // as a pagination boundary. Continue until the server returns a short page.
   }
 
   return rows.length >= pageSize;
@@ -555,7 +693,7 @@ async function fetchEventTable(cookieInfo, params) {
   
   const headers = generateHeaders(cookieString, csrfToken);
   
-  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.eventEndpoint}?uuid=${API_CONFIG.uuid}`;
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.eventEndpoint}`;
   
   console.log(`[ApiClient] 请求事件表参数:`, JSON.stringify(requestBody, null, 2));
   
@@ -598,6 +736,120 @@ async function fetchVulnTable(cookieInfo, params) {
   console.log(`[ApiClient] 请求资产漏洞表参数:`, JSON.stringify(requestBody, null, 2));
 
   return httpPost(url, headers, JSON.stringify(requestBody));
+}
+
+async function visitHomePage(cookieInfo) {
+  const { cookieString, csrfToken } = cookieInfo;
+  const headers = generateHeaders(cookieString, csrfToken, {
+    accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    referer: buildHomeUrl(),
+    'sec-fetch-dest': 'document',
+    'sec-fetch-mode': 'navigate',
+    'sec-fetch-site': 'same-origin'
+  });
+  delete headers['content-type'];
+  delete headers['x-requested-with'];
+
+  return httpGetBuffer(buildHomeUrl(), headers);
+}
+
+function extractTargetCompanyList(response) {
+  const data = response && typeof response === 'object' ? response.data : null;
+  if (data && Array.isArray(data.target_company_list)) return data.target_company_list;
+  if (Array.isArray(response && response.target_company_list)) return response.target_company_list;
+  return [];
+}
+
+function normalizeCompanyText(value) {
+  return String(value || '').trim();
+}
+
+function resolveTargetCompanyId(optionResponse, targetName = '') {
+  const rows = extractTargetCompanyList(optionResponse);
+  if (!rows.length) {
+    throw new Error(`暴露面目标公司列表为空: ${JSON.stringify(optionResponse).substring(0, 500)}`);
+  }
+
+  const normalizedTarget = normalizeCompanyText(targetName);
+  if (normalizedTarget) {
+    const matched = rows.find(row => normalizeCompanyText(row.target_company) === normalizedTarget);
+    if (matched && matched.target_company_id) {
+      return String(matched.target_company_id);
+    }
+  }
+
+  if (rows.length === 1 && rows[0].target_company_id) {
+    return String(rows[0].target_company_id);
+  }
+
+  const available = rows
+    .map(row => `${row.target_company || ''}(${row.target_company_id || ''})`)
+    .join(', ');
+  throw new Error(`无法唯一确定暴露面 target_company_id，目标客户: ${targetName || '未指定'}，可选项: ${available}`);
+}
+
+async function fetchExposedTargetCompanyOptions(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  await visitHomePage(cookieInfo);
+
+  const requestBody = buildExposedTargetCompanyOptionRequestBody(params);
+  const headers = generateHeaders(cookieString, csrfToken, {
+    referer: buildHomeUrl()
+  });
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.exposedTargetCompanyOptionEndpoint}`;
+
+  console.log(`[ApiClient] 请求暴露面目标公司参数:`, JSON.stringify(requestBody, null, 2));
+
+  return httpPost(url, headers, JSON.stringify(requestBody));
+}
+
+async function fetchExposedSurfaceExportInfo(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  const optionResponse = params.targetCompanyIds && params.targetCompanyIds.length
+    ? null
+    : await fetchExposedTargetCompanyOptions(cookieInfo, params);
+  const targetCompanyIds = params.targetCompanyIds && params.targetCompanyIds.length
+    ? params.targetCompanyIds
+    : [resolveTargetCompanyId(optionResponse, params.customerName)];
+
+  const requestBody = buildExposedExportRequestBody({
+    ...params,
+    targetCompanyIds
+  });
+  const headers = generateHeaders(cookieString, csrfToken, {
+    referer: buildHomeUrl()
+  });
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.exposedExportEndpoint}`;
+
+  console.log(`[ApiClient] 请求暴露面导出参数:`, JSON.stringify(requestBody, null, 2));
+
+  return httpPost(url, headers, JSON.stringify(requestBody));
+}
+
+async function downloadExposedSurfaceFile(cookieInfo, exportResponse) {
+  const { cookieString, csrfToken } = cookieInfo;
+  const relativeUrl = (((exportResponse || {}).data || {}).url) || exportResponse.url;
+  if (!relativeUrl) {
+    throw new Error(`暴露面导出响应缺少下载地址: ${JSON.stringify(exportResponse).substring(0, 500)}`);
+  }
+
+  const downloadUrl = new URL(relativeUrl, `https://${API_CONFIG.baseUrl}`).toString();
+  const headers = generateHeaders(cookieString, csrfToken, {
+    accept: 'application/zip,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/octet-stream,*/*',
+    referer: buildHomeUrl()
+  });
+  delete headers['content-type'];
+
+  const downloaded = await httpGetBuffer(downloadUrl, headers);
+  return {
+    ...downloaded,
+    buffer: extractXlsxFromZipOrSelf(downloaded.buffer)
+  };
+}
+
+async function fetchExposedSurfaceFile(cookieInfo, params) {
+  const exportInfo = await fetchExposedSurfaceExportInfo(cookieInfo, params);
+  return downloadExposedSurfaceFile(cookieInfo, exportInfo);
 }
 
 async function visitCustomerBusinessPage(cookieInfo, params) {
@@ -725,6 +977,7 @@ async function fetchCompanyPage(cookieInfo, params = {}) {
 async function resolveCompanyIdByName(cookieInfo, companyName, options = {}) {
   const pageSize = options.pageSize || 100;
   const keyword = options.keyword || '';
+  const pageDelayMs = Number.isFinite(options.pageDelayMs) ? options.pageDelayMs : 10;
   let offset = 0;
   let page = 1;
   let previousFingerprint = null;
@@ -753,6 +1006,9 @@ async function resolveCompanyIdByName(cookieInfo, companyName, options = {}) {
     if (rows.length < pageSize) break;
     offset += pageSize;
     page++;
+    if (pageDelayMs > 0) {
+      await sleep(pageDelayMs);
+    }
   }
 
   throw new Error(`未找到客户名称对应的 customer_id: ${companyName}`);
@@ -798,8 +1054,10 @@ async function fetchAllPages(fetchFunc, cookieInfo, params, dataKey = 'data') {
       
       page++;
       
-      // 避免请求过快
-      await sleep(500);
+      const pageDelayMs = Number.isFinite(params.pageDelayMs) ? params.pageDelayMs : 10;
+      if (pageDelayMs > 0) {
+        await sleep(pageDelayMs);
+      }
     } catch (error) {
       console.error(`[ApiClient] 第 ${page} 页请求失败: ${error.message}`);
       throw error;
@@ -820,15 +1078,24 @@ module.exports = {
   buildAlarmRequestBody,
   buildVulnRequestBody,
   buildAssetDownloadRequestBody,
+  buildExposedTargetCompanyOptionRequestBody,
+  buildExposedExportRequestBody,
   buildCustomerBusinessUrl,
+  buildHomeUrl,
   httpPost,
   httpGetBuffer,
+  extractXlsxFromZipOrSelf,
   extractRowsFromResponse,
   getTotalFromResponse,
   generateHeaders,
   fetchEventTable,
   fetchAlarmTable,
   fetchVulnTable,
+  visitHomePage,
+  fetchExposedTargetCompanyOptions,
+  fetchExposedSurfaceExportInfo,
+  downloadExposedSurfaceFile,
+  fetchExposedSurfaceFile,
   visitCustomerBusinessPage,
   fetchAssetDownloadInfo,
   downloadAssetFile,

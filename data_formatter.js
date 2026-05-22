@@ -322,6 +322,25 @@ function getFirstWorksheet(wb) {
   return wb.Sheets[wb.SheetNames[0]] || null;
 }
 
+function getWorksheetByNames(wb, preferredNames = []) {
+  if (!wb || !Array.isArray(wb.SheetNames) || wb.SheetNames.length === 0) {
+    return null;
+  }
+
+  for (const name of preferredNames) {
+    if (wb.Sheets[name]) {
+      return wb.Sheets[name];
+    }
+  }
+
+  const statsSheetName = wb.SheetNames.find(name => String(name).includes('统计'));
+  if (statsSheetName && wb.Sheets[statsSheetName]) {
+    return wb.Sheets[statsSheetName];
+  }
+
+  return null;
+}
+
 function countWorksheetDataRows(ws) {
   if (!ws || !ws['!ref']) return 0;
   return XLSX.utils.sheet_to_json(ws, { defval: '' })
@@ -455,6 +474,12 @@ function roundTo(value, digits = 2) {
   return Math.round(value * factor) / factor;
 }
 
+function formatRatioAsPercentage(value, digits = 2) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '';
+  const percentage = roundTo(value * 100, digits);
+  return `${Number(percentage.toFixed(digits))}%`;
+}
+
 function averageNumbers(values) {
   if (!Array.isArray(values) || values.length === 0) return 0;
   const total = values.reduce((sum, item) => sum + item, 0);
@@ -508,9 +533,11 @@ function setWorksheetCellValue(ws, address, value) {
 
 function buildStatisticsCells(statsContext) {
   const {
+    customer,
     startDate,
     endDate,
     eventRows = [],
+    eventStats = {},
     alarmRows = [],
     vulnRows = []
   } = statsContext || {};
@@ -526,6 +553,29 @@ function buildStatisticsCells(statsContext) {
   const d17 = vulnRows.filter(row => toText(row['跟进状态']) === '已修复').length;
   const d15 = '';
   const d14 = (toNumericOrNull(d15) || 0) + d16 + d17;
+  const highRiskVulnRows = vulnRows.filter(row => toText(row['漏洞等级']) === '高危');
+  const highRiskProtectedCount = highRiskVulnRows.filter(row => toText(row['跟进状态']) === '已防护').length;
+  const d34 = highRiskVulnRows.length > 0
+    ? formatRatioAsPercentage(highRiskProtectedCount / highRiskVulnRows.length, 2)
+    : '0%';
+  const d35Numbers = eventRows
+    .filter((row) => (
+      isEventCategoryType(row.event_grading_tag)
+      && toText(row.push_status) === '已通告'
+    ))
+    .map(row => toNumericOrNull(row['识别时长']))
+    .filter(value => value !== null);
+  const d35 = averageNumbers(d35Numbers);
+  const d36Numbers = eventRows
+    .filter((row) => (
+      isEventCategoryType(row.event_grading_tag)
+      && toText(row.push_status) === '已通告'
+    ))
+    .map(row => toNumericOrNull(row['响应时长']))
+    .filter(value => value !== null);
+  const d36 = averageNumbers(d36Numbers);
+  const d37 = vulnRows.filter(row => toText(row['跟进状态']).includes('已')).length;
+  const d38 = eventRows.filter(row => isDateInRange(row.create_time, range)).length;
 
   const g5 = alarmRows.filter((row) => (
     isDateInRange(row.create_time, range)
@@ -562,9 +612,13 @@ function buildStatisticsCells(statsContext) {
     && isEventCategoryType(row.event_grading_tag)
     && toText(row.event_status) === '不处置'
   )).length;
-  const g9 = g7 > 0 ? roundTo((g9HandledCount + g9IgnoredCount) / g7, 4) : 0;
+  const g9 = g7 > 0 ? formatRatioAsPercentage((g9HandledCount + g9IgnoredCount) / g7, 2) : '0%';
+  const g4 = eventStats && eventStats.strategyOptimizeCount !== undefined
+    ? eventStats.strategyOptimizeCount
+    : '';
 
   return {
+    J1: customer || '',
     L1: formatReportDate(startDate),
     M1: formatReportDate(endDate),
     D3: '',
@@ -582,7 +636,25 @@ function buildStatisticsCells(statsContext) {
     D16: d16,
     D17: d17,
     D18: '',
-    G4: '',
+    D20: '',
+    D21: '',
+    D22: '',
+    D23: d17,
+    D24: d16,
+    D25: '',
+    D27: '',
+    D28: '',
+    D29: '',
+    D30: '',
+    D32: '',
+    D33: '',
+    D34: d34,
+    D35: d35,
+    D36: d36,
+    D37: d37,
+    D38: d38,
+    D39: '',
+    G4: g4,
     G5: g5,
     G6: g6,
     G7: g7,
@@ -619,9 +691,12 @@ function generateReport(options) {
     endDate,
     reportTemplatePath,
     assetWorkbookBuffer,
+    exposedSurfaceWorkbookBuffer,
     eventData,
+    eventStats,
     alarmData,
     vulnData,
+    vulnRawRowCount,
     outputDir,
     eventHeaders,
     alarmHeaders,
@@ -637,7 +712,7 @@ function generateReport(options) {
     errors: []
   };
   
-  const outputPath = outputDir || process.cwd();
+  const outputPath = outputDir || __dirname;
   
   try {
     const reportFileName = generateFileName(customer, startDate, endDate, 'report', customerId);
@@ -646,19 +721,28 @@ function generateReport(options) {
     ensureWorksheetsExist(wb, ['数据统计', '资产表', '暴露面', '资产漏洞表', '告警表', '事件表']);
     const assetWorkbook = readWorkbookFromBuffer(assetWorkbookBuffer);
     const assetWorksheet = getFirstWorksheet(assetWorkbook);
+    const exposedSurfaceWorkbook = readWorkbookFromBuffer(exposedSurfaceWorkbookBuffer);
+    const exposedSurfaceWorksheet = getWorksheetByNames(exposedSurfaceWorkbook, ['统计', '统计sheet', '统计Sheet']);
+    if (exposedSurfaceWorkbookBuffer && !exposedSurfaceWorksheet) {
+      throw new Error('暴露面工作簿中未找到统计 Sheet');
+    }
     const assetRowCount = countWorksheetDataRows(assetWorksheet);
+    const exposedSurfaceRowCount = countWorksheetDataRows(exposedSurfaceWorksheet);
     const vulnRowCount = Array.isArray(vulnData) ? vulnData.length : 0;
     const alarmRowCount = Array.isArray(alarmData) ? alarmData.length : 0;
     const eventRowCount = Array.isArray(eventData) ? eventData.length : 0;
 
     replaceWorksheet(wb, '资产表', assetWorksheet);
+    replaceWorksheet(wb, '暴露面', exposedSurfaceWorksheet);
     replaceWorksheet(wb, '资产漏洞表', createWorksheet(vulnData || [], vulnHeaders || null, vulnHeaderDisplayMap || null));
     replaceWorksheet(wb, '告警表', createWorksheet(alarmData || [], alarmHeaders || null, alarmHeaderDisplayMap || null));
     replaceWorksheet(wb, '事件表', createWorksheet(eventData || [], eventHeaders || null, eventHeaderDisplayMap || null));
     populateStatisticsSheet(wb, {
+      customer,
       startDate,
       endDate,
       eventRows: eventData || [],
+      eventStats: eventStats || {},
       alarmRows: alarmData || [],
       vulnRows: vulnData || []
     });
@@ -669,12 +753,16 @@ function generateReport(options) {
       type: 'report',
       path: reportFilePath,
       name: reportFileName,
-      rowCount: assetRowCount + vulnRowCount + alarmRowCount + eventRowCount,
+      rowCount: assetRowCount + exposedSurfaceRowCount + vulnRowCount + alarmRowCount + eventRowCount,
       sheets: [
         { name: '数据统计', rowCount: 0 },
         { name: '资产表', rowCount: assetRowCount },
-        { name: '暴露面', rowCount: 0 },
-        { name: '资产漏洞表', rowCount: vulnRowCount },
+        { name: '暴露面', rowCount: exposedSurfaceRowCount },
+        {
+          name: '资产漏洞表',
+          rowCount: vulnRowCount,
+          ...(Number.isInteger(vulnRawRowCount) ? { rawRowCount: vulnRawRowCount } : {})
+        },
         { name: '告警表', rowCount: alarmRowCount },
         { name: '事件表', rowCount: eventRowCount }
       ]
@@ -682,8 +770,8 @@ function generateReport(options) {
 
     console.log(`[DataFormatter] 报告已保存: ${reportFilePath}`);
     console.log(`[DataFormatter] 使用模板: ${reportTemplatePath}`);
-    console.log(`[DataFormatter] 已写入 Sheet: 资产表、资产漏洞表、告警表、事件表`);
-    console.log(`[DataFormatter] 保留模板 Sheet: 数据统计、暴露面`);
+    console.log(`[DataFormatter] 已写入 Sheet: 资产表、暴露面、资产漏洞表、告警表、事件表`);
+    console.log(`[DataFormatter] 已更新 Sheet: 数据统计`);
     
   } catch (error) {
     result.success = false;
