@@ -84,6 +84,14 @@ const STRATEGY_OPTIMIZE_MANAGE_SUB_TYPES = new Set([
   'NTA_STRATEGY_OPTIMIZE'
 ]);
 
+const EVENT_SCENE_STAT_NAMES = {
+  penetrationFramework: '渗透框架',
+  trojan: '木马',
+  proxyTool: '代理工具',
+  mining: '挖矿',
+  accountSecurity: '账号安全'
+};
+
 const EVENT_GRADING_TAG_5_MANAGE_TYPE_RULES = {
   INTRANET_THREAT: '一般事件',
   EMERGENCY_RESPONSE: '重大事件',
@@ -160,13 +168,14 @@ const EVENT_OUTPUT_FIELDS = [
   'finished_time',
   'incidence',
   'update_protected_time',
+  'affected_assets',
   'update_announced_time',
   'update_accept_risk_time',
   'push_status',
   'wechat_push_time',
   '识别时长',
   '响应时长',
-  '遏制时间',
+  '遏制时长',
   '处置时长',
   '闭环时长'
 ];
@@ -191,6 +200,7 @@ const ALARM_OUTPUT_FIELDS = [
 const VULN_OUTPUT_FIELDS = [
   '漏洞名称',
   '漏洞等级',
+  '是否可利用',
   '受影响主机/位置',
   'IP',
   '内/外网',
@@ -420,6 +430,33 @@ function isLatestThreat(tagValue) {
   return typeof tagValue === 'string' && tagValue === LATEST_THREAT_TYPE;
 }
 
+function isEventCategoryTag(tagValue) {
+  const text = String(tagValue === null || tagValue === undefined ? '' : tagValue).trim();
+  if (!text) return false;
+  return ['重大事件', '重要事件', '一般事件'].includes(text) || text.includes('事件');
+}
+
+function createEventSceneStatSets(manageSubTypeMap) {
+  const sets = {};
+  for (const key of Object.keys(EVENT_SCENE_STAT_NAMES)) {
+    sets[key] = new Set();
+  }
+
+  for (const [value, name] of Object.entries(manageSubTypeMap || {})) {
+    for (const [key, targetName] of Object.entries(EVENT_SCENE_STAT_NAMES)) {
+      if (String(name || '').trim() === targetName) {
+        sets[key].add(String(value));
+      }
+    }
+  }
+
+  return sets;
+}
+
+function createEmptyEventSceneStats() {
+  return Object.fromEntries(Object.keys(EVENT_SCENE_STAT_NAMES).map(key => [key, 0]));
+}
+
 function pickFirstDateTime(...values) {
   for (const value of values) {
     const dt = parseDateTime(value);
@@ -537,6 +574,13 @@ function formatVulnLevel(value) {
   return VULN_LEVEL_DISPLAY[key] ?? value;
 }
 
+function formatVulnHighAvailability(value) {
+  const key = stringifyEnumKey(value);
+  if (key === '1') return '是';
+  if (key === '0') return '否';
+  return '';
+}
+
 function resolveEventGradingTag5Rule(eventDoc) {
   if (stringifyEnumKey(eventDoc.event_grading_tag) !== '5') {
     return { ignore: false, strategyOptimizeCount: 0 };
@@ -585,6 +629,7 @@ function transformEventDoc(eventDoc, ctx, overrides = {}) {
     create_time: eventDoc.create_time,
     type: buildTypeDisplay(manageTypeDisplay, manageSubTypeDisplay, '->'),
     host_ip: eventDoc.host_ip,
+    affected_assets: eventDoc.affected_assets,
     内网外网资产: resolveEventSecurityDomain(eventDoc.host_ip, ctx.securityDomainByIp),
     event_status: EVENT_EVENT_STATUS_DISPLAY[eventDoc.event_status] ?? eventDoc.event_status,
     service_status: EVENT_SERVICE_STATUS_DISPLAY[stringifyEnumKey(eventDoc.service_status)] ?? eventDoc.service_status,
@@ -603,7 +648,7 @@ function transformEventDoc(eventDoc, ctx, overrides = {}) {
 
   transformed['识别时长'] = calcRecognitionDurationMinutes({ ...eventDoc, event_grading_tag: transformed.event_grading_tag });
   transformed['响应时长'] = calcAccessDurationMinutes({ ...eventDoc, event_grading_tag: transformed.event_grading_tag });
-  transformed['遏制时间'] = calcContainmentDurationMinutes({ ...eventDoc, event_grading_tag: transformed.event_grading_tag });
+  transformed['遏制时长'] = calcContainmentDurationMinutes({ ...eventDoc, event_grading_tag: transformed.event_grading_tag });
   transformed['处置时长'] = calcDisposalDurationMinutes({ ...eventDoc, event_grading_tag: transformed.event_grading_tag });
   transformed['闭环时长'] = calcClosedLoopDurationMinutes({ ...eventDoc, event_grading_tag: transformed.event_grading_tag });
 
@@ -648,6 +693,7 @@ function transformVulnDoc(vulnDoc, ctx) {
   return secondLevels.map((secondLevel) => ({
     漏洞名称: vulnDoc.name,
     漏洞等级: formatVulnLevel(vulnDoc.level),
+    是否可利用: formatVulnHighAvailability(vulnDoc.is_high_availability),
     '受影响主机/位置': asset,
     IP: ip,
     '内/外网': resolveSecurityDomainByIp(ip, ctx.securityDomainByIp),
@@ -669,17 +715,29 @@ function transformEventDocsWithStats(eventDocs, options = {}) {
   };
 
   const stats = {
-    strategyOptimizeCount: 0
+    strategyOptimizeCount: 0,
+    sceneCounts: createEmptyEventSceneStats()
   };
+  const sceneStatSets = createEventSceneStatSets(ctx.manageSubTypeMap);
   const rows = [];
 
   for (const doc of eventDocs || []) {
     const rule = resolveEventGradingTag5Rule(doc);
     if (rule.ignore) continue;
     stats.strategyOptimizeCount += rule.strategyOptimizeCount || 0;
-    rows.push(transformEventDoc(doc, ctx, {
+    const transformed = transformEventDoc(doc, ctx, {
       eventGradingTag: rule.eventGradingTag
-    }));
+    });
+    rows.push(transformed);
+
+    if (isEventCategoryTag(transformed.event_grading_tag)) {
+      const manageSubType = stringifyEnumKey(doc.manage_sub_type);
+      for (const [key, values] of Object.entries(sceneStatSets)) {
+        if (manageSubType !== null && values.has(manageSubType)) {
+          stats.sceneCounts[key] += 1;
+        }
+      }
+    }
   }
 
   return { rows, stats };

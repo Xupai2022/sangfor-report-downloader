@@ -20,11 +20,15 @@ const cookieReader = require('./cookie_reader');
 const apiClient = require('./api_client');
 
 const DEFAULT_REPORT_TEMPLATE_PATH = path.join(__dirname, 'data.xlsx');
+const DEFAULT_COOKIE_DOWNLOAD_DIR = process.env.USERNAME
+  ? path.join('M:\\Users', process.env.USERNAME, 'Downloads')
+  : __dirname;
 
 // 配置
 const CONFIG = {
   // Cookie 文件路径 (由浏览器插件生成)
-  cookiePath: process.env.SANGFOR_COOKIE_PATH || path.join(__dirname, 'cookies.txt'),
+  cookiePath: process.env.SANGFOR_COOKIE_PATH || path.join(DEFAULT_COOKIE_DOWNLOAD_DIR, 'cookies.txt'),
+  xdrCookiePath: process.env.SANGFOR_XDR_COOKIE_PATH || path.join(DEFAULT_COOKIE_DOWNLOAD_DIR, 'xdr_cookies.txt'),
 
   // 报告模板路径
   reportTemplatePath: process.env.SANGFOR_REPORT_TEMPLATE_PATH || DEFAULT_REPORT_TEMPLATE_PATH,
@@ -54,9 +58,10 @@ const EVENT_HEADER_DISPLAY_MAP = {
   contain_time: '事件遏制时间',
   finished_time: '事件闭环时间',
   incidence: '影响范围',
-  update_accept_risk_time: '接受风险时间',
-  update_announced_time: '通告时间',
   update_protected_time: '防护时间',
+  affected_assets: '受影响资产',
+  update_announced_time: '通告时间',
+  update_accept_risk_time: '接受风险时间',
   push_status: '通告状态',
   wechat_push_time: '实际通告时间'
 };
@@ -121,11 +126,14 @@ function parseArgs() {
     endDate: '',
     type: 'all',  // all, asset, event, alarm, vuln
     customerId: '',
+    protectStartDate: '',
+    protectEndDate: '',
     pageSize: CONFIG.defaultPageSize,
     pageSizeProvided: false,
     pageDelayMs: CONFIG.defaultPageDelayMs,
     responseOnly: false,
     cookiePath: CONFIG.cookiePath,
+    xdrCookiePath: CONFIG.xdrCookiePath,
     outputDir: CONFIG.outputDir,
     reportTemplatePath: CONFIG.reportTemplatePath,
     manageSubTypeMapFile: process.env.SANGFOR_MANAGE_SUB_TYPE_MAP_FILE || path.join(__dirname, 'data', 'manage_sub_type_map.json'),
@@ -155,8 +163,17 @@ function parseArgs() {
       case '--customer-id':
         options.customerId = args[++i] || '';
         break;
+      case '--protect-start':
+        options.protectStartDate = args[++i] || '';
+        break;
+      case '--protect-end':
+        options.protectEndDate = args[++i] || '';
+        break;
       case '--cookie-path':
         options.cookiePath = args[++i] || CONFIG.cookiePath;
+        break;
+      case '--xdr-cookie-path':
+        options.xdrCookiePath = args[++i] || CONFIG.xdrCookiePath;
         break;
       case '--output-dir':
         options.outputDir = args[++i] || CONFIG.outputDir;
@@ -210,9 +227,12 @@ function showHelp() {
   --customer, -c <名称>    客户名称
   --start, -s <日期>       开始日期 (格式: YYYY-MM-DD)
   --end, -e <日期>         结束日期 (格式: YYYY-MM-DD)
+  --protect-start <日期>   护网开始日期 (可选，格式: YYYY-MM-DD)
+  --protect-end <日期>     护网结束日期 (可选，格式: YYYY-MM-DD)
   --type, -t <类型>        报告类型: all(默认), asset, event, alarm, vuln, exposed
   --customer-id <ID>       客户ID (可选)
-  --cookie-path <路径>     Cookie 文件路径 (默认: 当前目录 cookies.txt，也可用 SANGFOR_COOKIE_PATH)
+  --cookie-path <路径>     Cookie 文件路径 (默认: M:\\Users\\%USERNAME%\\Downloads\\cookies.txt，也可用 SANGFOR_COOKIE_PATH)
+  --xdr-cookie-path <路径> XDR Cookie 文件路径 (默认: M:\\Users\\%USERNAME%\\Downloads\\xdr_cookies.txt，也可用 SANGFOR_XDR_COOKIE_PATH)
   --output-dir <路径>      输出目录 (默认: 脚本所在目录)
   --page-size <大小>       每页数量 (默认: 100，资产漏洞表默认: 50)
   --page-delay-ms <毫秒>   每页请求后的等待时间 (默认: 10)
@@ -262,6 +282,7 @@ async function interactiveInput() {
       pageDelayMs: CONFIG.defaultPageDelayMs,
       responseOnly: false,
       cookiePath: CONFIG.cookiePath,
+      xdrCookiePath: CONFIG.xdrCookiePath,
       outputDir: CONFIG.outputDir,
       manageSubTypeMapFile: process.env.SANGFOR_MANAGE_SUB_TYPE_MAP_FILE || path.join(__dirname, 'data', 'manage_sub_type_map.json'),
       assetMapFile: process.env.SANGFOR_ASSET_MAP_FILE || path.join(__dirname, 'data', 'asset.xlsx')
@@ -314,6 +335,12 @@ async function fetchAndSaveFirstResponse(cookieInfo, requestParams, options) {
         requestParams
       );
       files.push(saveJsonResponse('exposed_export', exportResponse, options));
+
+      const ipListStatisticsResponse = await requestWithRetry(
+        (params) => apiClient.fetchExposedSurfaceIpListStatistics(cookieInfo, params),
+        requestParams
+      );
+      files.push(saveJsonResponse('exposed_ip_list_statistics_port', { port: ipListStatisticsResponse }, options));
       continue;
     }
 
@@ -361,6 +388,10 @@ function waitForContinue() {
       resolve();
     });
   });
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 /**
@@ -458,11 +489,18 @@ async function downloadReports(options) {
       eventData: null,
       alarmData: null,
       vulnData: null,
+      exposedSurfacePortCount: null,
+      xdrLogSearchCount: null,
+      xdrIn2outLogSearchCount: null,
+      xdrOut2inLogSearchCount: null,
+      xdrMonthlyIn2outLogSearchCounts: [],
+      xdrMonthlyOut2inLogSearchCounts: [],
       assetError: null,
       exposedSurfaceError: null,
       eventError: null,
       alarmError: null,
-      vulnError: null
+      vulnError: null,
+      xdrError: null
     };
     
     // 4. 下载数据
@@ -494,6 +532,12 @@ async function downloadReports(options) {
         );
         results.exposedSurfaceWorkbookBuffer = exposedSurfaceFile.buffer;
         console.log(`[成功] 暴露面: 已下载，稍后写入总报告`);
+
+        results.exposedSurfacePortCount = await requestWithRetry(
+          (params) => apiClient.fetchExposedSurfaceIpListStatistics(cookieInfo, params),
+          requestParams
+        );
+        console.log(`[成功] 暴露面端口统计: ${results.exposedSurfacePortCount}`);
       } catch (error) {
         results.exposedSurfaceError = error.message;
         console.error(`[失败] 暴露面: ${error.message}`);
@@ -559,6 +603,81 @@ async function downloadReports(options) {
       }
       throw error;
     }
+
+    console.log('\n--- 查询 XDR 重保日志统计 ---');
+    try {
+      const reportRange = dataFormatter.buildReportSecondRange({
+        startDate: options.startDate,
+        endDate: options.endDate
+      });
+      const reportMonthRanges = dataFormatter.buildReportMonthSecondRanges({
+        startDate: options.startDate,
+        endDate: options.endDate
+      });
+      const protectionRanges = dataFormatter.buildProtectionSecondRanges({
+        startDate: options.startDate,
+        endDate: options.endDate,
+        protectStartDate: options.protectStartDate,
+        protectEndDate: options.protectEndDate
+      });
+      console.log(`[XDR] in2out/out2in 查询时间段: ${reportRange.start} ~ ${reportRange.end}`);
+      console.log(`[XDR] 月度 in2out/out2in 查询时间段: ${reportMonthRanges.length} 段`);
+      console.log(`[XDR] 重保查询时间段: ${protectionRanges.length} 段`);
+      const xdrCookieInfo = cookieReader.getCookieInfo(options.xdrCookiePath || CONFIG.xdrCookiePath);
+      results.xdrIn2outLogSearchCount = await requestWithRetry(
+        () => apiClient.fetchXdrIn2outLogSearchCount(xdrCookieInfo, reportRange),
+        requestParams
+      );
+      results.xdrOut2inLogSearchCount = await requestWithRetry(
+        () => apiClient.fetchXdrOut2inLogSearchCount(xdrCookieInfo, reportRange),
+        requestParams
+      );
+      results.xdrMonthlyIn2outLogSearchCounts = [];
+      results.xdrMonthlyOut2inLogSearchCounts = [];
+      for (let index = 0; index < reportMonthRanges.length; index += 1) {
+        const monthRange = reportMonthRanges[index];
+        console.log(`[XDR] 月度 in2out/out2in count 查询 ${index + 1}/${reportMonthRanges.length}: ${monthRange.monthLabel} ${monthRange.start} ~ ${monthRange.end}`);
+        const in2outCount = await requestWithRetry(
+          () => apiClient.fetchXdrIn2outLogSearchCount(xdrCookieInfo, monthRange),
+          requestParams
+        );
+        const out2inCount = await requestWithRetry(
+          () => apiClient.fetchXdrOut2inLogSearchCount(xdrCookieInfo, monthRange),
+          requestParams
+        );
+        results.xdrMonthlyIn2outLogSearchCounts.push({
+          monthLabel: monthRange.monthLabel,
+          count: in2outCount
+        });
+        results.xdrMonthlyOut2inLogSearchCounts.push({
+          monthLabel: monthRange.monthLabel,
+          count: out2inCount
+        });
+        const delayMs = Number.isFinite(options.pageDelayMs) ? options.pageDelayMs : 10;
+        if (delayMs > 0 && index < reportMonthRanges.length - 1) {
+          await sleep(delayMs);
+        }
+      }
+      if (protectionRanges.length === 0) {
+        results.xdrLogSearchCount = 0;
+      } else {
+        results.xdrLogSearchCount = await requestWithRetry(
+          () => apiClient.fetchXdrLogSearchCountForRanges(xdrCookieInfo, protectionRanges, {
+            pageDelayMs: options.pageDelayMs
+          }),
+          requestParams
+        );
+      }
+      console.log(`[成功] XDR in2out 日志统计: ${results.xdrIn2outLogSearchCount}`);
+      console.log(`[成功] XDR out2in 日志统计: ${results.xdrOut2inLogSearchCount}`);
+      console.log(`[成功] XDR 月度 in2out 日志统计: ${results.xdrMonthlyIn2outLogSearchCounts.map(item => `${item.monthLabel}:${item.count}`).join(', ')}`);
+      console.log(`[成功] XDR 月度 out2in 日志统计: ${results.xdrMonthlyOut2inLogSearchCounts.map(item => `${item.monthLabel}:${item.count}`).join(', ')}`);
+      console.log(`[成功] XDR 重保日志统计: ${results.xdrLogSearchCount}`);
+    } catch (error) {
+      results.xdrError = error.message;
+      throw new Error(`XDR 重保日志统计失败: ${error.message}`);
+    }
+
     const transformedEventResult = results.eventData
       ? soarTransformer.transformEventDocsWithStats(results.eventData, {
         manageSubTypeMapFile: options.manageSubTypeMapFile,
@@ -584,14 +703,22 @@ async function downloadReports(options) {
       customerId: resolvedCustomerId,
       startDate: options.startDate,
       endDate: options.endDate,
+      protectStartDate: options.protectStartDate,
+      protectEndDate: options.protectEndDate,
       assetWorkbookBuffer: results.assetWorkbookBuffer,
       exposedSurfaceWorkbookBuffer: results.exposedSurfaceWorkbookBuffer,
+      exposedSurfacePortCount: results.exposedSurfacePortCount,
       reportTemplatePath: options.reportTemplatePath,
       eventData: transformedEventData,
       eventStats: transformedEventResult ? transformedEventResult.stats : null,
       alarmData: transformedAlarmData,
       vulnData: transformedVulnData,
       vulnRawRowCount: Array.isArray(results.vulnData) ? results.vulnData.length : null,
+      xdrLogSearchCount: results.xdrLogSearchCount,
+      xdrIn2outLogSearchCount: results.xdrIn2outLogSearchCount,
+      xdrOut2inLogSearchCount: results.xdrOut2inLogSearchCount,
+      xdrMonthlyIn2outLogSearchCounts: results.xdrMonthlyIn2outLogSearchCounts,
+      xdrMonthlyOut2inLogSearchCounts: results.xdrMonthlyOut2inLogSearchCounts,
       outputDir: options.outputDir || CONFIG.outputDir,
       eventHeaders: soarTransformer.EVENT_OUTPUT_FIELDS,
       alarmHeaders: soarTransformer.ALARM_OUTPUT_FIELDS,

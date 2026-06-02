@@ -19,6 +19,8 @@ description: 下载 SOAR 原始数据并生成指定客户、指定时间段的�
 ## 前置条件
 
 1. Chrome Cookie 插件已经安装并已写出 Cookie 文件。
+   - MSS Cookie: `M:\Users\$env:USERNAME\Downloads\cookies.txt`
+   - XDR Cookie: `M:\Users\$env:USERNAME\Downloads\xdr_cookies.txt`
 2. 当前项目已经执行过 `npm install`。
 3. 调用方已经给出明确的结构化参数，例如客户名、客户 ID、开始日期、结束日期，以及可选的报告类型。
 
@@ -31,7 +33,8 @@ node "$HOME\.openclaw\workspace\skills\sangfor-report-downloader\sangfor_downloa
   --customer "客户中文名" `
   --start "2026-05-12" `
   --end "2026-05-13" `
-  --cookie-path "M:\Users\$env:USERNAME\Downloads\cookies.txt"
+  --cookie-path "M:\Users\$env:USERNAME\Downloads\cookies.txt" `
+  --xdr-cookie-path "M:\Users\$env:USERNAME\Downloads\xdr_cookies.txt"
 ```
 
 如果使用客户 ID：
@@ -41,7 +44,8 @@ node "$HOME\.openclaw\workspace\skills\sangfor-report-downloader\sangfor_downloa
   --customer-id 26912728 `
   --start "2026-05-12" `
   --end "2026-05-13" `
-  --cookie-path "M:\Users\$env:USERNAME\Downloads\cookies.txt"
+  --cookie-path "M:\Users\$env:USERNAME\Downloads\cookies.txt" `
+  --xdr-cookie-path "M:\Users\$env:USERNAME\Downloads\xdr_cookies.txt"
 ```
 
 可选报告类型：
@@ -75,5 +79,6 @@ $HOME\.openclaw\workspace\skills\sangfor-report-downloader
 ## 重要说明
 
 - 生成的工作簿可以作为后续 PPT 生成的 Excel 输入，但本技能本身只到 Excel 为止。
+- 后续如有数据从 XDR 获取，使用 `--xdr-cookie-path` 指向 `xdr_cookies.txt`，不要复用 MSS 的 `cookies.txt`。
 - 如果用户要的是 AI PPT，或者要对 PPT 进行重写，不要停留在本技能，应切换到 `ai-ppt-pipeline` 或 `ai-report-generator`。
 - 如果用户明确只要某一个表，保留其显式指定的报告类型，不要默认扩成全部数据。

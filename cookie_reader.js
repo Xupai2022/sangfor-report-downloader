@@ -133,7 +133,7 @@ function extractCsrfToken(cookieString) {
   const cookies = parseCookieString(cookieString);
   
   // 尝试多个可能的 token 字段名
-  const tokenKeys = ['csrf_token', 'X-Csrftoken', 'csrftoken', '_csrf'];
+  const tokenKeys = ['csrf_token', 'x-csrf-token', 'X-Csrftoken', 'csrftoken', '_csrf'];
   
   for (const key of tokenKeys) {
     if (cookies[key]) {

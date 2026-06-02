@@ -119,6 +119,20 @@ function formatCellValue(value, type) {
   }
 }
 
+function isIPv4Text(value) {
+  return /^(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)$/.test(String(value || '').trim());
+}
+
+function countAffectedAssetIps(value) {
+  if (!Array.isArray(value)) return 0;
+  const uniqueIps = new Set();
+  value.forEach((item) => {
+    const text = String(item || '').trim();
+    if (isIPv4Text(text)) uniqueIps.add(text);
+  });
+  return uniqueIps.size;
+}
+
 function shouldKeepStringValue(key, value) {
   if (typeof value !== 'string') return false;
 
@@ -392,6 +406,30 @@ function formatReportDate(value) {
   return `${year}/${month}/${day}`;
 }
 
+const HOLIDAY_PROTECTION_PERIODS = [
+  { name: '元旦', startDate: '2023-12-30', endDate: '2024-01-01' },
+  { name: '春节', startDate: '2024-02-10', endDate: '2024-02-17' },
+  { name: '清明', startDate: '2024-04-04', endDate: '2024-04-06' },
+  { name: '五一', startDate: '2024-05-01', endDate: '2024-05-05' },
+  { name: '端午', startDate: '2024-06-08', endDate: '2024-06-10' },
+  { name: '中秋', startDate: '2024-09-15', endDate: '2024-09-17' },
+  { name: '国庆', startDate: '2024-10-01', endDate: '2024-10-07' },
+  { name: '元旦', startDate: '2025-01-01', endDate: '2025-01-01' },
+  { name: '春节', startDate: '2025-01-28', endDate: '2025-02-04' },
+  { name: '清明', startDate: '2025-04-04', endDate: '2025-04-06' },
+  { name: '五一', startDate: '2025-05-01', endDate: '2025-05-05' },
+  { name: '端午', startDate: '2025-05-31', endDate: '2025-06-02' },
+  { name: '国庆', startDate: '2025-10-01', endDate: '2025-10-07' },
+  { name: '中秋', startDate: '2025-10-06', endDate: '2025-10-08' },
+  { name: '元旦', startDate: '2026-01-01', endDate: '2026-01-03' },
+  { name: '春节', startDate: '2026-02-15', endDate: '2026-02-23' },
+  { name: '清明', startDate: '2026-04-04', endDate: '2026-04-06' },
+  { name: '五一', startDate: '2026-05-01', endDate: '2026-05-05' },
+  { name: '端午', startDate: '2026-06-19', endDate: '2026-06-21' },
+  { name: '中秋', startDate: '2026-09-25', endDate: '2026-09-27' },
+  { name: '国庆', startDate: '2026-10-01', endDate: '2026-10-07' }
+];
+
 function parseReportDateValue(value) {
   if (value === null || value === undefined || value === '') return null;
 
@@ -442,13 +480,202 @@ function buildInclusiveDateRange(startDate, endDate) {
 
   const rangeStart = new Date(start.getFullYear(), start.getMonth(), start.getDate(), 0, 0, 0, 0);
   const rangeEnd = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 23, 59, 59, 999);
+  if (rangeStart > rangeEnd) {
+    throw new Error(`统计时间范围开始日期不能晚于结束日期: ${startDate} ~ ${endDate}`);
+  }
   return { start: rangeStart, end: rangeEnd };
+}
+
+function addMonths(date, monthOffset) {
+  return new Date(date.getFullYear(), date.getMonth() + monthOffset, 1);
+}
+
+function formatYearMonth(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+function buildMonthRange(date) {
+  const start = new Date(date.getFullYear(), date.getMonth(), 1, 0, 0, 0, 0);
+  const end = new Date(date.getFullYear(), date.getMonth() + 1, 0, 23, 59, 59, 999);
+  return { start, end };
 }
 
 function isDateInRange(value, range) {
   const date = parseReportDateValue(value);
   if (!date || !range) return false;
   return date >= range.start && date <= range.end;
+}
+
+function rangesOverlap(left, right) {
+  return left.start <= right.end && right.start <= left.end;
+}
+
+function rangeContains(outer, inner) {
+  return outer.start <= inner.start && outer.end >= inner.end;
+}
+
+function formatReportDateRange(startDate, endDate) {
+  if (!startDate || !endDate) return '';
+  return `${formatReportDate(startDate)}-${formatReportDate(endDate)}`;
+}
+
+function buildProtectionPeriods(statsContext, reportRange) {
+  const periods = [];
+  const protectStartDate = statsContext.protectStartDate
+    || (statsContext.protectionPeriod && statsContext.protectionPeriod.startDate)
+    || '';
+  const protectEndDate = statsContext.protectEndDate
+    || (statsContext.protectionPeriod && statsContext.protectionPeriod.endDate)
+    || '';
+
+  if (protectStartDate && protectEndDate) {
+    periods.push({
+      source: 'manual',
+      name: '护网时间',
+      startDate: protectStartDate,
+      endDate: protectEndDate,
+      range: buildInclusiveDateRange(protectStartDate, protectEndDate)
+    });
+  }
+
+  HOLIDAY_PROTECTION_PERIODS.forEach((holiday) => {
+    const holidayRange = buildInclusiveDateRange(holiday.startDate, holiday.endDate);
+    if (!rangesOverlap(holidayRange, reportRange)) return;
+    periods.push(Object.assign({}, holiday, {
+      source: 'holiday',
+      range: holidayRange
+    }));
+  });
+
+  return periods;
+}
+
+function mergeInclusiveRanges(periods) {
+  const ranges = periods
+    .map(period => period.range)
+    .filter(Boolean)
+    .map(range => ({ startMs: range.start.getTime(), endMs: range.end.getTime() }))
+    .sort((a, b) => a.startMs - b.startMs || a.endMs - b.endMs);
+
+  const merged = [];
+  ranges.forEach((range) => {
+    const last = merged[merged.length - 1];
+    if (!last || range.startMs > last.endMs + 1) {
+      merged.push(Object.assign({}, range));
+      return;
+    }
+    if (range.endMs > last.endMs) {
+      last.endMs = range.endMs;
+    }
+  });
+  return merged;
+}
+
+function buildProtectionSecondRanges(statsContext) {
+  const reportRange = buildInclusiveDateRange(statsContext.startDate, statsContext.endDate);
+  const periods = buildProtectionPeriods(statsContext, reportRange);
+  const clippedPeriods = periods
+    .map((period) => {
+      if (!period.range) return null;
+      const startMs = Math.max(period.range.start.getTime(), reportRange.start.getTime());
+      const endMs = Math.min(period.range.end.getTime(), reportRange.end.getTime());
+      if (startMs > endMs) return null;
+      return {
+        ...period,
+        range: {
+          start: new Date(startMs),
+          end: new Date(endMs)
+        }
+      };
+    })
+    .filter(Boolean);
+
+  return mergeInclusiveRanges(clippedPeriods).map(range => ({
+    start: Math.floor(range.startMs / 1000),
+    end: Math.floor(range.endMs / 1000)
+  }));
+}
+
+function buildReportSecondRange(statsContext) {
+  const reportRange = buildInclusiveDateRange(statsContext.startDate, statsContext.endDate);
+  return {
+    start: Math.floor(reportRange.start.getTime() / 1000),
+    end: Math.floor(reportRange.end.getTime() / 1000)
+  };
+}
+
+function buildReportMonthSecondRanges(statsContext, maxMonths = 12) {
+  const reportRange = buildInclusiveDateRange(statsContext.startDate, statsContext.endDate);
+  const ranges = [];
+  let cursor = new Date(reportRange.start.getFullYear(), reportRange.start.getMonth(), 1, 0, 0, 0, 0);
+
+  while (
+    cursor <= reportRange.end
+    && ranges.length < maxMonths
+  ) {
+    const year = cursor.getFullYear();
+    const month = cursor.getMonth();
+    const monthStart = new Date(year, month, 1, 0, 0, 0, 0);
+    const monthEnd = new Date(year, month + 1, 0, 23, 59, 59, 999);
+    const startMs = Math.max(monthStart.getTime(), reportRange.start.getTime());
+    const endMs = Math.min(monthEnd.getTime(), reportRange.end.getTime());
+
+    if (startMs <= endMs) {
+      ranges.push({
+        monthLabel: formatYearMonth(monthStart),
+        start: Math.floor(startMs / 1000),
+        end: Math.floor(endMs / 1000)
+      });
+    }
+
+    cursor = new Date(year, month + 1, 1, 0, 0, 0, 0);
+  }
+
+  return ranges;
+}
+
+function isTimestampInMergedRanges(timestamp, ranges) {
+  if (!Number.isFinite(timestamp) || !Array.isArray(ranges) || ranges.length === 0) return false;
+
+  let low = 0;
+  let high = ranges.length - 1;
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const range = ranges[mid];
+    if (timestamp < range.startMs) {
+      high = mid - 1;
+    } else if (timestamp > range.endMs) {
+      low = mid + 1;
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getFirstFieldValue(row, fieldNames) {
+  if (!row || !Array.isArray(fieldNames)) return '';
+  for (const fieldName of fieldNames) {
+    if (row[fieldName] !== undefined && row[fieldName] !== null && row[fieldName] !== '') {
+      return row[fieldName];
+    }
+  }
+  return '';
+}
+
+function countRowsInProtectionRanges(rows, fieldNames, mergedRanges) {
+  if (!Array.isArray(rows) || rows.length === 0 || mergedRanges.length === 0) return 0;
+
+  let count = 0;
+  rows.forEach((row) => {
+    const date = parseReportDateValue(getFirstFieldValue(row, fieldNames));
+    if (date && isTimestampInMergedRanges(date.getTime(), mergedRanges)) {
+      count += 1;
+    }
+  });
+  return count;
 }
 
 function toText(value) {
@@ -498,6 +725,12 @@ function isEventCategoryType(eventType) {
   return ['重大事件', '重要事件', '一般事件'].includes(text) || text.includes('事件');
 }
 
+function isStatisticsEventCountType(eventType) {
+  const text = toText(eventType);
+  if (!text) return false;
+  return text.includes('事件') || ['重大威胁', '一般威胁'].includes(text);
+}
+
 function getWorksheetCell(ws, address) {
   if (!ws[address]) {
     ws[address] = { t: 's', v: '' };
@@ -505,8 +738,74 @@ function getWorksheetCell(ws, address) {
   return ws[address];
 }
 
+function ensureWorksheetRefIncludesCell(ws, address) {
+  if (!ws || !address) return;
+  const cellRef = XLSX.utils.decode_cell(address);
+  let range;
+  if (ws['!ref']) {
+    range = XLSX.utils.decode_range(ws['!ref']);
+  } else {
+    range = { s: Object.assign({}, cellRef), e: Object.assign({}, cellRef) };
+  }
+
+  range.s.r = Math.min(range.s.r, cellRef.r);
+  range.s.c = Math.min(range.s.c, cellRef.c);
+  range.e.r = Math.max(range.e.r, cellRef.r);
+  range.e.c = Math.max(range.e.c, cellRef.c);
+  ws['!ref'] = XLSX.utils.encode_range(range);
+}
+
+function getWorksheetCellValue(ws, address) {
+  if (!ws || !ws[address]) return '';
+  const cell = ws[address];
+  return cell.v === null || cell.v === undefined ? '' : cell.v;
+}
+
+function getWorksheetRows(ws) {
+  if (!ws || !ws['!ref']) return [];
+  return XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+}
+
+function findHeaderRowAndIndexes(rows, headerNames) {
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const row = rows[rowIndex] || [];
+    const indexes = {};
+    let matchedCount = 0;
+    for (const headerName of headerNames) {
+      const colIndex = row.findIndex(value => toText(value) === headerName);
+      indexes[headerName] = colIndex;
+      if (colIndex >= 0) matchedCount += 1;
+    }
+    if (matchedCount > 0) {
+      return { rowIndex, indexes };
+    }
+  }
+  return { rowIndex: -1, indexes: {} };
+}
+
+function countAssetRowsByCriteria(assetWorksheet, criteria) {
+  const rows = getWorksheetRows(assetWorksheet);
+  if (rows.length === 0) return 0;
+
+  const headerNames = ['服务类型', '资产类型', '安全域'];
+  const { rowIndex, indexes } = findHeaderRowAndIndexes(rows, headerNames);
+  const startRow = rowIndex >= 0 ? rowIndex + 1 : 0;
+  const serviceTypeIndex = indexes['服务类型'] >= 0 ? indexes['服务类型'] : 4;
+  const assetTypeIndex = indexes['资产类型'] >= 0 ? indexes['资产类型'] : 5;
+  const securityDomainIndex = indexes['安全域'] >= 0 ? indexes['安全域'] : 32;
+
+  return rows.slice(startRow).filter((row) => {
+    if (!row || row.every(value => toText(value) === '')) return false;
+    if (criteria.assetType !== undefined && toText(row[assetTypeIndex]) !== criteria.assetType) return false;
+    if (criteria.securityDomain !== undefined && toText(row[securityDomainIndex]) !== criteria.securityDomain) return false;
+    if (criteria.serviceType !== undefined && !toText(row[serviceTypeIndex]).includes(criteria.serviceType)) return false;
+    return true;
+  }).length;
+}
+
 function setWorksheetCellValue(ws, address, value) {
   const cell = getWorksheetCell(ws, address);
+  ensureWorksheetRefIncludesCell(ws, address);
 
   if (value === '' || value === null || value === undefined) {
     cell.t = 's';
@@ -531,27 +830,73 @@ function setWorksheetCellValue(ws, address, value) {
   delete cell.f;
 }
 
+function setWorksheetBlankPercentCell(ws, address) {
+  const cell = getWorksheetCell(ws, address);
+  cell.t = 's';
+  cell.v = '';
+  cell.z = '0%';
+  delete cell.w;
+  delete cell.f;
+}
+
 function buildStatisticsCells(statsContext) {
   const {
     customer,
     startDate,
     endDate,
+    protectStartDate,
+    protectEndDate,
     eventRows = [],
     eventStats = {},
     alarmRows = [],
-    vulnRows = []
+    vulnRows = [],
+    assetWorksheet = null,
+    exposedSurfaceWorksheet = null,
+    exposedSurfacePortCount = '',
+    xdrIn2outLogSearchCount = '',
+    xdrOut2inLogSearchCount = '',
+    xdrMonthlyIn2outLogSearchCounts = [],
+    xdrMonthlyOut2inLogSearchCounts = [],
+    xdrLogSearchCount = ''
   } = statsContext || {};
 
   const range = buildInclusiveDateRange(startDate, endDate);
+  const protectionPeriods = buildProtectionPeriods(
+    Object.assign({}, statsContext, { protectStartDate, protectEndDate }),
+    range
+  );
+  const holidayPeriods = protectionPeriods.filter(period => period.source === 'holiday');
+  const mergedProtectionRanges = mergeInclusiveRanges(protectionPeriods);
+  const manualProtectionPeriod = protectionPeriods.find(period => period.source === 'manual');
+  const shouldCountManualProtectionPeriod = Boolean(
+    manualProtectionPeriod
+    && rangesOverlap(manualProtectionPeriod.range, range)
+    && !holidayPeriods.some(period => rangeContains(period.range, manualProtectionPeriod.range))
+  );
+  const importantProtectionCount = holidayPeriods.length + (shouldCountManualProtectionPeriod ? 1 : 0);
+  const startMonth = addMonths(range.start, 0);
+  const displayMonthCount = Math.min(
+    12,
+    ((range.end.getFullYear() - startMonth.getFullYear()) * 12)
+      + (range.end.getMonth() - startMonth.getMonth())
+      + 1
+  );
 
   const d6 = vulnRows.filter(row => isDateInRange(row['更新时间'], range)).length;
   const d11 = eventRows.filter((row) => (
     toText(row.event_grading_tag) === '最新威胁'
     && isDateInRange(row.create_time, range)
   )).length;
+  const d12 = eventRows
+    .filter(row => (
+      isDateInRange(row.create_time, range)
+      && toText(row.type).includes('未公开威胁')
+    ))
+    .reduce((total, row) => total + countAffectedAssetIps(row.affected_assets), 0);
   const d16 = vulnRows.filter(row => toText(row['跟进状态']) === '已防护').length;
   const d17 = vulnRows.filter(row => toText(row['跟进状态']) === '已修复').length;
-  const d15 = '';
+  const d18 = alarmRows.filter(row => toText(row.type).includes('漏洞利用攻击')).length;
+  const d15 = d12;
   const d14 = (toNumericOrNull(d15) || 0) + d16 + d17;
   const highRiskVulnRows = vulnRows.filter(row => toText(row['漏洞等级']) === '高危');
   const highRiskProtectedCount = highRiskVulnRows.filter(row => toText(row['跟进状态']) === '已防护').length;
@@ -576,11 +921,84 @@ function buildStatisticsCells(statsContext) {
   const d36 = averageNumbers(d36Numbers);
   const d37 = vulnRows.filter(row => toText(row['跟进状态']).includes('已')).length;
   const d38 = eventRows.filter(row => isDateInRange(row.create_time, range)).length;
+  const c80 = vulnRows.filter((row) => (
+    toText(row['漏洞等级']) === '高危'
+    && toText(row['是否可利用']) === '是'
+    && isDateInRange(row['更新时间'], range)
+  )).length;
+  const d80 = vulnRows.filter((row) => (
+    toText(row['内/外网']) === '外网'
+    && toText(row['跟进状态']).includes('已')
+    && isDateInRange(row['更新时间'], range)
+  )).length;
+  const highRiskExploitableRows = vulnRows.filter((row) => (
+    toText(row['漏洞等级']) === '高危'
+    && toText(row['是否可利用']) === '是'
+  ));
+  const highRiskExploitableHandledCount = highRiskExploitableRows
+    .filter(row => toText(row['跟进状态']).includes('已'))
+    .length;
+  const f80 = highRiskExploitableRows.length > 0
+    ? formatRatioAsPercentage(highRiskExploitableHandledCount / highRiskExploitableRows.length, 2)
+    : '0%';
+  const countVulnByLevel = (level) => vulnRows
+    .filter(row => toText(row['漏洞等级']) === level)
+    .length;
+  const countHandledVulnByLevel = (level) => vulnRows
+    .filter((row) => (
+      toText(row['漏洞等级']) === level
+      && toText(row['跟进状态']).includes('已')
+    ))
+    .length;
+  const d83 = countVulnByLevel('高危');
+  const d84 = countVulnByLevel('中危');
+  const d85 = countVulnByLevel('低危');
+  const e83 = countHandledVulnByLevel('高危');
+  const e84 = countHandledVulnByLevel('中危');
+  const e85 = countHandledVulnByLevel('低危');
+  const f83 = d83 > 0 ? formatRatioAsPercentage(e83 / d83, 2) : '0%';
+  const f84 = d84 > 0 ? formatRatioAsPercentage(e84 / d84, 2) : '0%';
+  const f85 = d85 > 0 ? formatRatioAsPercentage(e85 / d85, 2) : '0%';
+  const i79 = getWorksheetCellValue(exposedSurfaceWorksheet, 'E4');
+  const i80 = getWorksheetCellValue(exposedSurfaceWorksheet, 'E5');
+  const i81 = exposedSurfacePortCount;
+  const i82 = vulnRows.filter(row => toText(row['内/外网']) === '外网').length;
+  const k79 = countAssetRowsByCriteria(assetWorksheet, {
+    assetType: '服务器',
+    securityDomain: '内网'
+  });
+  const k80 = countAssetRowsByCriteria(assetWorksheet, {
+    assetType: '服务器',
+    securityDomain: '内网',
+    serviceType: '服务内'
+  });
+  const k81 = vulnRows.filter(row => toText(row['内/外网']) === '内网').length;
+  const k82 = vulnRows.filter((row) => (
+    toText(row['内/外网']) === '内网'
+    && toText(row['跟进状态']) === '已防护'
+  )).length;
+  const k83 = vulnRows.filter((row) => (
+    toText(row['内/外网']) === '内网'
+    && toText(row['跟进状态']) === '已修复'
+  )).length;
 
   const g5 = alarmRows.filter((row) => (
     isDateInRange(row.create_time, range)
     && toText(row.type).includes('外部威胁')
   )).length;
+  const d62 = alarmRows.filter(row => toText(row.type).includes('威胁')).length;
+  const d63 = eventRows.filter((row) => (
+    isDateInRange(row.create_time, range)
+    && ['重大威胁', '一般威胁'].includes(toText(row.event_grading_tag))
+  )).length;
+  const d64Numbers = eventRows
+    .filter((row) => (
+      isThreatEventType(row.event_grading_tag)
+      && toText(row.push_status) === '已通告'
+    ))
+    .map(row => toNumericOrNull(row['响应时长']))
+    .filter(value => value !== null);
+  const d64 = averageNumbers(d64Numbers);
 
   const g6Numbers = eventRows
     .filter(row => isThreatEventType(row.event_grading_tag))
@@ -601,6 +1019,24 @@ function buildStatisticsCells(statsContext) {
     .map(row => toNumericOrNull(row['响应时长']))
     .filter(value => value !== null);
   const g8 = averageNumbers(g8Numbers);
+  const e49Numbers = eventRows
+    .filter((row) => (
+      isEventCategoryType(row.event_grading_tag)
+      && toText(row.push_status) === '已通告'
+    ))
+    .map(row => toNumericOrNull(row['处置时长']))
+    .filter(value => value !== null);
+  const e49 = averageNumbers(e49Numbers);
+  const averageAnnouncedEventDuration = (fieldName) => {
+    const numbers = eventRows
+      .filter((row) => (
+        isEventCategoryType(row.event_grading_tag)
+        && toText(row.push_status) === '已通告'
+      ))
+      .map(row => toNumericOrNull(row[fieldName]))
+      .filter(value => value !== null);
+    return averageNumbers(numbers);
+  };
 
   const g9HandledCount = eventRows.filter((row) => (
     isDateInRange(row.create_time, range)
@@ -613,14 +1049,108 @@ function buildStatisticsCells(statsContext) {
     && toText(row.event_status) === '不处置'
   )).length;
   const g9 = g7 > 0 ? formatRatioAsPercentage((g9HandledCount + g9IgnoredCount) / g7, 2) : '0%';
+  const g11 = `${d6 + d12}+弱口令数量`;
+  const g12 = eventRows.filter((row) => (
+    isDateInRange(row.create_time, range)
+    && isStatisticsEventCountType(row.event_grading_tag)
+  )).length;
+  const d28 = countRowsInProtectionRanges(
+    alarmRows,
+    ['create_time', '创建时间', '告警创建时间'],
+    mergedProtectionRanges
+  );
+  const d29 = countRowsInProtectionRanges(
+    eventRows,
+    ['create_time', '事件创建时间', '创建时间'],
+    mergedProtectionRanges
+  );
   const g4 = eventStats && eventStats.strategyOptimizeCount !== undefined
     ? eventStats.strategyOptimizeCount
     : '';
+  const eventSceneCounts = eventStats && eventStats.sceneCounts ? eventStats.sceneCounts : {};
+  const monthTrendCells = {};
+  const blankTrendCells = [];
+  for (let i = 0; i < 12; i += 1) {
+    const col = XLSX.utils.encode_col(2 + i);
+    const month = addMonths(startMonth, i);
+    const monthRange = buildMonthRange(month);
+    const shouldDisplayMonth = i < displayMonthCount;
+    if (!shouldDisplayMonth) {
+      ['58', '59', '71', '72', '73', '74', '75', '86', '87', '88']
+        .forEach(row => blankTrendCells.push(`${col}${row}`));
+      continue;
+    }
+    const responseNumbers = eventRows
+      .filter(row => isDateInRange(row.create_time, monthRange))
+      .map(row => toNumericOrNull(row['响应时长']))
+      .filter(value => value !== null);
+    monthTrendCells[`${col}58`] = formatYearMonth(month);
+    monthTrendCells[`${col}59`] = averageNumbers(responseNumbers);
+    monthTrendCells[`${col}71`] = formatYearMonth(month);
+    monthTrendCells[`${col}72`] = '';
+    monthTrendCells[`${col}73`] = '';
+    monthTrendCells[`${col}74`] = '';
+    monthTrendCells[`${col}75`] = alarmRows
+      .filter(row => isDateInRange(row.create_time, monthRange))
+      .length;
+    monthTrendCells[`${col}86`] = formatYearMonth(month);
+    monthTrendCells[`${col}87`] = vulnRows
+      .filter(row => isDateInRange(row['更新时间'], monthRange))
+      .length;
+    monthTrendCells[`${col}88`] = vulnRows
+      .filter((row) => (
+        toText(row['跟进状态']).includes('已')
+        && isDateInRange(row['更新时间'], monthRange)
+      ))
+      .length;
+  }
+  const monthlyOut2inCells = {};
+  for (let i = 0; i < 12; i += 1) {
+    const col = XLSX.utils.encode_col(2 + i);
+    monthlyOut2inCells[`${col}71`] = '';
+    monthlyOut2inCells[`${col}72`] = '';
+    monthlyOut2inCells[`${col}73`] = '';
+  }
+  (Array.isArray(xdrMonthlyOut2inLogSearchCounts) ? xdrMonthlyOut2inLogSearchCounts : [])
+    .slice(0, 12)
+    .forEach((item, index) => {
+      if (index >= displayMonthCount) return;
+      const col = XLSX.utils.encode_col(2 + index);
+      monthlyOut2inCells[`${col}71`] = item && item.monthLabel ? item.monthLabel : '';
+      monthlyOut2inCells[`${col}72`] = item && item.count !== undefined ? item.count : '';
+    });
+  (Array.isArray(xdrMonthlyIn2outLogSearchCounts) ? xdrMonthlyIn2outLogSearchCounts : [])
+    .slice(0, 12)
+    .forEach((item, index) => {
+      if (index >= displayMonthCount) return;
+      const col = XLSX.utils.encode_col(2 + index);
+      monthlyOut2inCells[`${col}73`] = item && item.count !== undefined ? item.count : '';
+    });
 
-  return {
+  const holidayCells = {};
+  for (let row = 4; row <= 30; row += 1) {
+    holidayCells[`L${row}`] = '';
+    holidayCells[`M${row}`] = '';
+  }
+  holidayPeriods.forEach((period, index) => {
+    const row = 4 + index;
+    holidayCells[`L${row}`] = period.name;
+    holidayCells[`M${row}`] = formatReportDateRange(period.startDate, period.endDate);
+  });
+  const holidaySummaryCells = {};
+  for (let row = 91; row <= 97; row += 1) {
+    holidaySummaryCells[`F${row}`] = '';
+  }
+  holidayPeriods.slice(0, 7).forEach((period, index) => {
+    holidaySummaryCells[`F${91 + index}`] = `${period.name}（${formatReportDateRange(period.startDate, period.endDate)}）`;
+  });
+
+  const cells = {
     J1: customer || '',
     L1: formatReportDate(startDate),
     M1: formatReportDate(endDate),
+    M3: protectStartDate && protectEndDate ? formatReportDateRange(protectStartDate, protectEndDate) : '',
+    ...holidayCells,
     D3: '',
     D4: '',
     D5: '',
@@ -630,23 +1160,23 @@ function buildStatisticsCells(statsContext) {
     D9: '',
     D10: '',
     D11: d11,
-    D12: '',
+    D12: d12,
     D14: d14,
     D15: d15,
     D16: d16,
     D17: d17,
-    D18: '',
+    D18: d18,
     D20: '',
-    D21: '',
+    D21: xdrIn2outLogSearchCount,
     D22: '',
     D23: d17,
     D24: d16,
     D25: '',
-    D27: '',
-    D28: '',
-    D29: '',
-    D30: '',
-    D32: '',
+    D27: xdrLogSearchCount,
+    D28: d28,
+    D29: d29,
+    D30: '100%',
+    D32: '100%',
     D33: '',
     D34: d34,
     D35: d35,
@@ -654,13 +1184,98 @@ function buildStatisticsCells(statsContext) {
     D37: d37,
     D38: d38,
     D39: '',
+    C49: g7,
+    D49: g8,
+    E49: e49,
+    F49: g9,
+    D51: eventSceneCounts.penetrationFramework || 0,
+    D52: eventSceneCounts.trojan || 0,
+    D53: eventSceneCounts.proxyTool || 0,
+    D54: eventSceneCounts.mining || 0,
+    D55: eventSceneCounts.accountSecurity || 0,
+    G51: averageAnnouncedEventDuration('识别时长'),
+    G52: averageAnnouncedEventDuration('响应时长'),
+    G53: averageAnnouncedEventDuration('遏制时长'),
+    G54: averageAnnouncedEventDuration('处置时长'),
+    G55: averageAnnouncedEventDuration('闭环时长'),
+    ...monthTrendCells,
+    ...monthlyOut2inCells,
+    D61: xdrOut2inLogSearchCount,
+    D62: d62,
+    D63: d63,
+    D64: d64,
+    D65: '',
+    D66: '',
+    D67: d11,
+    D68: d12,
+    G62: '',
+    G63: '',
+    G64: '',
+    G65: '',
+    G66: '',
+    J62: '',
+    J63: '',
+    J64: '',
+    J65: '',
+    J66: '',
+    M61: '',
+    M62: '',
+    M63: '',
+    M64: '',
+    M65: '',
+    M66: '',
+    C80: c80,
+    D80: d80,
+    E80: '',
+    F80: f80,
+    D83: d83,
+    D84: d84,
+    D85: d85,
+    E83: e83,
+    E84: e84,
+    E85: e85,
+    F83: f83,
+    F84: f84,
+    F85: f85,
+    I79: i79,
+    I80: i80,
+    I81: i81,
+    I82: i82,
+    K79: k79,
+    K80: k80,
+    K81: k81,
+    K82: k82,
+    K83: k83,
+    N79: '',
+    D90: importantProtectionCount,
+    D91: d29,
+    D92: '100%',
+    ...holidaySummaryCells,
+    G91: '',
+    G92: '',
+    G93: '',
+    G94: '',
+    G95: '',
+    G96: '',
+    G97: '',
+    H91: '100%',
+    H92: '100%',
+    H93: '100%',
+    H94: '100%',
+    H95: '100%',
+    H96: '100%',
+    H97: '100%',
     G4: g4,
     G5: g5,
     G6: g6,
     G7: g7,
     G8: g8,
-    G9: g9
+    G9: g9,
+    G11: g11,
+    G12: g12
   };
+  cells.__blankCells = blankTrendCells;
+  return cells;
 }
 
 function populateStatisticsSheet(wb, statsContext) {
@@ -670,8 +1285,15 @@ function populateStatisticsSheet(wb, statsContext) {
 
   const ws = wb.Sheets['数据统计'];
   const cells = buildStatisticsCells(statsContext);
+  const blankCells = Array.isArray(cells.__blankCells) ? cells.__blankCells : [];
+  delete cells.__blankCells;
+
+  blankCells.forEach(address => {
+    setWorksheetCellValue(ws, address, '');
+  });
 
   Object.entries(cells).forEach(([address, value]) => {
+    if (value === '' || value === null || value === undefined) return;
     setWorksheetCellValue(ws, address, value);
   });
 
@@ -689,14 +1311,22 @@ function generateReport(options) {
     customerId,
     startDate,
     endDate,
+    protectStartDate,
+    protectEndDate,
     reportTemplatePath,
     assetWorkbookBuffer,
     exposedSurfaceWorkbookBuffer,
+    exposedSurfacePortCount,
     eventData,
     eventStats,
     alarmData,
     vulnData,
     vulnRawRowCount,
+    xdrIn2outLogSearchCount,
+    xdrOut2inLogSearchCount,
+    xdrMonthlyIn2outLogSearchCounts,
+    xdrMonthlyOut2inLogSearchCounts,
+    xdrLogSearchCount,
     outputDir,
     eventHeaders,
     alarmHeaders,
@@ -741,10 +1371,20 @@ function generateReport(options) {
       customer,
       startDate,
       endDate,
+      protectStartDate,
+      protectEndDate,
       eventRows: eventData || [],
       eventStats: eventStats || {},
       alarmRows: alarmData || [],
-      vulnRows: vulnData || []
+      vulnRows: vulnData || [],
+      assetWorksheet,
+      exposedSurfaceWorksheet,
+      exposedSurfacePortCount,
+      xdrIn2outLogSearchCount,
+      xdrOut2inLogSearchCount,
+      xdrMonthlyIn2outLogSearchCounts,
+      xdrMonthlyOut2inLogSearchCounts,
+      xdrLogSearchCount
     });
 
     ensureOutputDir(reportFilePath);
@@ -818,6 +1458,9 @@ module.exports = {
   saveToExcel,
   formatReportDate,
   parseReportDateValue,
+  buildReportSecondRange,
+  buildReportMonthSecondRanges,
+  buildProtectionSecondRanges,
   buildStatisticsCells,
   populateStatisticsSheet,
   generateReport,

@@ -7,16 +7,22 @@ const https = require('https');
 const http = require('http');
 const zlib = require('zlib');
 
+const REQUEST_TIMEOUT_MS = 75000;
+const REQUEST_TIMEOUT_SECONDS = REQUEST_TIMEOUT_MS / 1000;
+
 // API 配置
 const API_CONFIG = {
   baseUrl: 'soar.sangfor.com.cn',
+  xdrBaseUrl: 'xdr.sangfor.com.cn',
   eventEndpoint: '/gateway/event-mgr/external/event_table',
   alarmEndpoint: '/gateway/alarm-mgr/v1/alarm_table/alarm_list',
   vulnEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/vuln_list_port_split',
   assetDownloadEndpoint: '/gateway/asset-mgr-service/order/v1/asset/download',
   exposedTargetCompanyOptionEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/exposed_surface_mss/get_target_company_option',
   exposedExportEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/exposed_surface_mss/export_result_report',
-  companyEndpoint: '/order/v1/user/company_simple_info'
+  exposedIpListStatisticsEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/exposed_surface_mss/ip_list_statistics',
+  companyEndpoint: '/order/v1/user/company_simple_info',
+  xdrLogSearchCountEndpoint: '/api/apex/logsearch/v1/log/search/count?enableCache=true&viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false'
 };
 
 /**
@@ -121,6 +127,68 @@ function generateHeaders(cookieString, csrfToken, overrides = {}) {
   };
 }
 
+function generateXdrHeaders(cookieString, csrfToken, overrides = {}) {
+  return {
+    'host': API_CONFIG.xdrBaseUrl,
+    'accept': 'application/json, text/plain, */*',
+    'accept-encoding': 'gzip, deflate, br',
+    'accept-language': 'zh-CN,zh;q=0.9',
+    'connection': 'keep-alive',
+    'content-type': 'application/json',
+    'cookie': cookieString,
+    'origin': 'https://xdr.sangfor.com.cn',
+    'referer': 'https://xdr.sangfor.com.cn/',
+    'sec-ch-ua': '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"Windows"',
+    'sec-fetch-dest': 'empty',
+    'sec-fetch-mode': 'cors',
+    'sec-fetch-site': 'same-origin',
+    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36',
+    'x-csrf-token': csrfToken,
+    'x-requested-with': 'XMLHttpRequest',
+    ...overrides
+  };
+}
+
+function buildXdrLogSearchCountRequestBody(params) {
+  return {
+    time: {
+      start: params.start,
+      end: params.end
+    },
+    tables: ['NetworkSecurityLog', 'EndpointSecurityLog']
+  };
+}
+
+function buildXdrAccessDirectionLogSearchCountRequestBody(params, accessDirection) {
+  return {
+    filter: {
+      logicalOp: 'and',
+      filters: [
+        {
+          field: 'accessDirection',
+          conditionalOp: 'IN',
+          value: [accessDirection]
+        }
+      ]
+    },
+    time: {
+      start: params.start,
+      end: params.end
+    },
+    tables: ['NetworkSecurityLog', 'EndpointSecurityLog']
+  };
+}
+
+function buildXdrIn2outLogSearchCountRequestBody(params) {
+  return buildXdrAccessDirectionLogSearchCountRequestBody(params, 'in2out');
+}
+
+function buildXdrOut2inLogSearchCountRequestBody(params) {
+  return buildXdrAccessDirectionLogSearchCountRequestBody(params, 'out2in');
+}
+
 function buildAlarmRequestBody(params) {
   const startTimestamp = dateToTimestamp(params.startTime);
   const endTimestamp = dateToTimestamp(params.endTime);
@@ -204,7 +272,7 @@ function httpPost(url, headers, body) {
         ...headers,
         'content-length': Buffer.byteLength(body)
       },
-      timeout: 30000
+      timeout: REQUEST_TIMEOUT_MS
     };
     
     console.log(`[ApiClient] 发送请求到: ${url}`);
@@ -253,7 +321,7 @@ function httpPost(url, headers, body) {
     
     req.on('timeout', () => {
       req.destroy();
-      reject(new Error('请求超时 (30秒)'));
+      reject(new Error(`请求超时 (${REQUEST_TIMEOUT_SECONDS}秒)`));
     });
     
     req.write(body);
@@ -273,7 +341,7 @@ function httpGetBuffer(url, headers = {}, redirectCount = 0) {
       path: urlObj.pathname + urlObj.search,
       method: 'GET',
       headers,
-      timeout: 30000
+      timeout: REQUEST_TIMEOUT_MS
     };
 
     console.log(`[ApiClient] 发送 GET 请求到: ${url}`);
@@ -325,7 +393,7 @@ function httpGetBuffer(url, headers = {}, redirectCount = 0) {
 
     req.on('timeout', () => {
       req.destroy();
-      reject(new Error('GET 请求超时 (30秒)'));
+      reject(new Error(`GET 请求超时 (${REQUEST_TIMEOUT_SECONDS}秒)`));
     });
 
     req.end();
@@ -556,6 +624,17 @@ function buildExposedExportRequestBody(params) {
     asset_tag: [2, 5, 3],
     target_company: Array.isArray(params.targetCompanyIds) ? params.targetCompanyIds : [],
     company_id: String(params.customerId || '')
+  };
+}
+
+function buildExposedIpListStatisticsRequestBody(params) {
+  return {
+    keyword: '',
+    target_company_id: Array.isArray(params.targetCompanyIds) ? params.targetCompanyIds : [],
+    related_task: [],
+    asset_tag: [],
+    company_id: String(params.customerId || ''),
+    attack_authorisation: 0
   };
 }
 
@@ -852,6 +931,30 @@ async function fetchExposedSurfaceFile(cookieInfo, params) {
   return downloadExposedSurfaceFile(cookieInfo, exportInfo);
 }
 
+async function fetchExposedSurfaceIpListStatistics(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  await visitHomePage(cookieInfo);
+
+  const requestBody = buildExposedIpListStatisticsRequestBody(params);
+  const headers = generateHeaders(cookieString, csrfToken, {
+    referer: buildHomeUrl()
+  });
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.exposedIpListStatisticsEndpoint}`;
+
+  console.log(`[ApiClient] 请求暴露面 IP 列表统计参数:`, JSON.stringify(requestBody, null, 2));
+
+  const result = await httpPost(url, headers, JSON.stringify(requestBody));
+  if (!result || result.code !== 0 || !result.data || result.data.port === undefined) {
+    throw new Error(`暴露面 IP 列表统计接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const port = Number(result.data.port);
+  if (!Number.isFinite(port)) {
+    throw new Error(`暴露面 IP 列表统计 port 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return port;
+}
+
 async function visitCustomerBusinessPage(cookieInfo, params) {
   const { cookieString, csrfToken } = cookieInfo;
   const businessUrl = buildCustomerBusinessUrl(params);
@@ -1068,6 +1171,108 @@ async function fetchAllPages(fetchFunc, cookieInfo, params, dataKey = 'data') {
   return allData;
 }
 
+async function fetchXdrLogSearchCount(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
+    throw new Error(`XDR count 时间范围无效: ${params.start} ~ ${params.end}`);
+  }
+  if (params.start > params.end) {
+    throw new Error(`XDR count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
+  }
+
+  const url = `https://${API_CONFIG.xdrBaseUrl}${API_CONFIG.xdrLogSearchCountEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken);
+  const body = JSON.stringify(buildXdrLogSearchCountRequestBody(params));
+  const result = await httpPost(url, headers, body);
+
+  if (!result || result.code !== 'Success') {
+    throw new Error(`XDR count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const count = Number(result.data);
+  if (!Number.isFinite(count)) {
+    throw new Error(`XDR count 响应 data 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return count;
+}
+
+async function fetchXdrIn2outLogSearchCount(cookieInfo, params) {
+  return fetchXdrAccessDirectionLogSearchCount(cookieInfo, params, 'in2out');
+}
+
+async function fetchXdrOut2inLogSearchCount(cookieInfo, params) {
+  return fetchXdrAccessDirectionLogSearchCount(cookieInfo, params, 'out2in');
+}
+
+async function fetchXdrAccessDirectionLogSearchCount(cookieInfo, params, accessDirection) {
+  const { cookieString, csrfToken } = cookieInfo;
+  if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
+    throw new Error(`XDR ${accessDirection} count 时间范围无效: ${params.start} ~ ${params.end}`);
+  }
+  if (params.start > params.end) {
+    throw new Error(`XDR ${accessDirection} count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
+  }
+
+  const url = `https://${API_CONFIG.xdrBaseUrl}${API_CONFIG.xdrLogSearchCountEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken);
+  const body = JSON.stringify(buildXdrAccessDirectionLogSearchCountRequestBody(params, accessDirection));
+  const result = await httpPost(url, headers, body);
+
+  if (!result || result.code !== 'Success') {
+    throw new Error(`XDR ${accessDirection} count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const count = Number(result.data);
+  if (!Number.isFinite(count)) {
+    throw new Error(`XDR ${accessDirection} count 响应 data 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return count;
+}
+
+async function fetchXdrLogSearchCountForRanges(cookieInfo, ranges, params = {}) {
+  if (!Array.isArray(ranges) || ranges.length === 0) {
+    console.log('[ApiClient] XDR 重保时间段为空，count 记为 0');
+    return 0;
+  }
+
+  let total = 0;
+  for (let index = 0; index < ranges.length; index += 1) {
+    const range = ranges[index];
+    console.log(`[ApiClient] XDR count 查询 ${index + 1}/${ranges.length}: ${range.start} ~ ${range.end}`);
+    const count = await fetchXdrLogSearchCount(cookieInfo, range);
+    total += count;
+    console.log(`[ApiClient] XDR count 本段 ${count}，累计 ${total}`);
+
+    const delayMs = Number.isFinite(params.pageDelayMs) ? params.pageDelayMs : 10;
+    if (delayMs > 0 && index < ranges.length - 1) {
+      await sleep(delayMs);
+    }
+  }
+  return total;
+}
+
+async function fetchXdrIn2outLogSearchCountForRanges(cookieInfo, ranges, params = {}) {
+  if (!Array.isArray(ranges) || ranges.length === 0) {
+    console.log('[ApiClient] XDR in2out 重保时间段为空，count 记为 0');
+    return 0;
+  }
+
+  let total = 0;
+  for (let index = 0; index < ranges.length; index += 1) {
+    const range = ranges[index];
+    console.log(`[ApiClient] XDR in2out count 查询 ${index + 1}/${ranges.length}: ${range.start} ~ ${range.end}`);
+    const count = await fetchXdrIn2outLogSearchCount(cookieInfo, range);
+    total += count;
+    console.log(`[ApiClient] XDR in2out count 本段 ${count}，累计 ${total}`);
+
+    const delayMs = Number.isFinite(params.pageDelayMs) ? params.pageDelayMs : 10;
+    if (delayMs > 0 && index < ranges.length - 1) {
+      await sleep(delayMs);
+    }
+  }
+  return total;
+}
+
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -1080,6 +1285,11 @@ module.exports = {
   buildAssetDownloadRequestBody,
   buildExposedTargetCompanyOptionRequestBody,
   buildExposedExportRequestBody,
+  buildExposedIpListStatisticsRequestBody,
+  buildXdrLogSearchCountRequestBody,
+  buildXdrAccessDirectionLogSearchCountRequestBody,
+  buildXdrIn2outLogSearchCountRequestBody,
+  buildXdrOut2inLogSearchCountRequestBody,
   buildCustomerBusinessUrl,
   buildHomeUrl,
   httpPost,
@@ -1088,6 +1298,7 @@ module.exports = {
   extractRowsFromResponse,
   getTotalFromResponse,
   generateHeaders,
+  generateXdrHeaders,
   fetchEventTable,
   fetchAlarmTable,
   fetchVulnTable,
@@ -1096,11 +1307,18 @@ module.exports = {
   fetchExposedSurfaceExportInfo,
   downloadExposedSurfaceFile,
   fetchExposedSurfaceFile,
+  fetchExposedSurfaceIpListStatistics,
   visitCustomerBusinessPage,
   fetchAssetDownloadInfo,
   downloadAssetFile,
   fetchAssetTableFile,
   fetchAllPages,
+  fetchXdrLogSearchCount,
+  fetchXdrLogSearchCountForRanges,
+  fetchXdrAccessDirectionLogSearchCount,
+  fetchXdrIn2outLogSearchCount,
+  fetchXdrOut2inLogSearchCount,
+  fetchXdrIn2outLogSearchCountForRanges,
   fetchCompanyPage,
   resolveCompanyIdByName
 };
