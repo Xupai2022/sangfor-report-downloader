@@ -21,6 +21,11 @@ const API_CONFIG = {
   exposedTargetCompanyOptionEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/exposed_surface_mss/get_target_company_option',
   exposedExportEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/exposed_surface_mss/export_result_report',
   exposedIpListStatisticsEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/exposed_surface_mss/ip_list_statistics',
+  weakPwdSummaryEndpoint: '/gateway/vuln-manager/vm/order/v1/weak_pwd/summary_list',
+  topnLoadConditionEndpoint: '/order/v1/tool_box/topn/load_condition',
+  topnThreatTypeEndpoint: '/order/v1/tool_box/topn/threat_type',
+  topnSrcIpGeoEndpoint: '/order/v1/tool_box/topn/src_ip_geo',
+  topnDstIpEndpoint: '/order/v1/tool_box/topn/dst_ip',
   companyEndpoint: '/order/v1/user/company_simple_info',
   xdrLogSearchCountEndpoint: '/api/apex/logsearch/v1/log/search/count?enableCache=true&viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false'
 };
@@ -549,6 +554,84 @@ function buildVulnRequestBody(params) {
   };
 }
 
+function buildWeakPwdSummaryRequestBody(params) {
+  const startTimestamp = dateToTimestamp(params.startTime);
+  const endTimestamp = dateToTimestamp(params.endTime);
+  const endOfDay = endTimestamp + 24 * 60 * 60 * 1000 - 1;
+
+  return {
+    order: 'asc',
+    offset: 0,
+    limit: 10,
+    keyword: '',
+    login_status: [],
+    is_intranet: [],
+    business_level: [],
+    src_storage: [],
+    src_type: [],
+    service_status: [0],
+    scene_tag: [],
+    login_time: [],
+    found_time: [startTimestamp, endOfDay],
+    reappear: 0,
+    is_admin: 1,
+    risk_level: [],
+    deal_status: [],
+    company_id: String(params.customerId || '')
+  };
+}
+
+function buildTopnLoadConditionRequestBody(params) {
+  return {
+    company_id: String(params.customerId || '')
+  };
+}
+
+function normalizeTopnConditionIds(ids) {
+  if (!Array.isArray(ids)) return [];
+  return ids
+    .map(id => String(id || '').trim())
+    .filter(id => id)
+    .map(id => ({ id }));
+}
+
+function normalizeTopnDeviceInfos(deviceInfos) {
+  if (!Array.isArray(deviceInfos)) return [];
+  return deviceInfos
+    .map((deviceInfo) => {
+      const deviceType = String((deviceInfo || {}).device_type || '').trim();
+      const deviceIdList = Array.isArray((deviceInfo || {}).device_id_list)
+        ? deviceInfo.device_id_list.map(id => String(id || '').trim()).filter(id => id)
+        : [];
+      if (!deviceType || deviceIdList.length === 0) return null;
+      return {
+        device_type: deviceType,
+        device_id_list: deviceIdList
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildTopnRequestBody(params, loadCondition, options = {}) {
+  const startTimestamp = dateToTimestamp(params.startTime);
+  const endTimestamp = dateToTimestamp(params.endTime);
+  const endOfDay = endTimestamp + 24 * 60 * 60 * 1000 - 1;
+  const conditionData = (loadCondition || {}).data || loadCondition || {};
+
+  return {
+    company_id: String(params.customerId || ''),
+    attack_type: normalizeTopnConditionIds(conditionData.attack_type_ids),
+    attack_direction: normalizeTopnConditionIds(conditionData.attack_direction_ids),
+    ip_type: options.ipType || 'src_ip',
+    topn: options.topn || 100,
+    device_infos: normalizeTopnDeviceInfos(conditionData.device_infos),
+    latest_time: [startTimestamp, endOfDay],
+    date_scope: 1,
+    resource_group_ids: [],
+    only_asset: 0
+  };
+}
+
 function buildAssetDownloadRequestBody(params) {
   return {
     asset_list: [],
@@ -815,6 +898,109 @@ async function fetchVulnTable(cookieInfo, params) {
   console.log(`[ApiClient] 请求资产漏洞表参数:`, JSON.stringify(requestBody, null, 2));
 
   return httpPost(url, headers, JSON.stringify(requestBody));
+}
+
+async function fetchWeakPwdSummaryTotal(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+
+  const requestBody = buildWeakPwdSummaryRequestBody(params);
+  const headers = generateHeaders(cookieString, csrfToken);
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.weakPwdSummaryEndpoint}`;
+
+  console.log(`[ApiClient] 请求弱口令统计参数:`, JSON.stringify(requestBody, null, 2));
+
+  const result = await httpPost(url, headers, JSON.stringify(requestBody));
+  if (!result || result.code !== 0) {
+    throw new Error(`弱口令统计接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const total = Number((((result || {}).data || {}).total) || 0);
+  if (!Number.isFinite(total)) {
+    throw new Error(`弱口令统计 total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  return total;
+}
+
+async function fetchTopnLoadCondition(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+
+  const requestBody = buildTopnLoadConditionRequestBody(params);
+  const headers = generateHeaders(cookieString, csrfToken);
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.topnLoadConditionEndpoint}`;
+
+  console.log(`[ApiClient] 请求 TopN 查询条件参数:`, JSON.stringify(requestBody, null, 2));
+
+  const result = await httpPost(url, headers, JSON.stringify(requestBody));
+  if (!result || result.code !== 0 || !result.data) {
+    throw new Error(`TopN 查询条件接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  return result.data;
+}
+
+function extractTopnList(result, label) {
+  if (!result || result.code !== 0 || !result.data || !Array.isArray(result.data.list)) {
+    throw new Error(`${label} 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return result.data.list;
+}
+
+async function fetchTopnThreatTypes(cookieInfo, params, loadCondition) {
+  const { cookieString, csrfToken } = cookieInfo;
+
+  const requestBody = buildTopnRequestBody(params, loadCondition);
+  const headers = generateHeaders(cookieString, csrfToken);
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.topnThreatTypeEndpoint}`;
+
+  console.log(`[ApiClient] 请求威胁类型 TopN 参数:`, JSON.stringify(requestBody, null, 2));
+
+  const result = await httpPost(url, headers, JSON.stringify(requestBody));
+  return extractTopnList(result, '威胁类型 TopN');
+}
+
+async function fetchTopnSrcIpGeos(cookieInfo, params, loadCondition) {
+  const { cookieString, csrfToken } = cookieInfo;
+
+  const requestBody = buildTopnRequestBody(params, loadCondition);
+  const headers = generateHeaders(cookieString, csrfToken);
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.topnSrcIpGeoEndpoint}`;
+
+  console.log(`[ApiClient] 请求攻击源地理位置 TopN 参数:`, JSON.stringify(requestBody, null, 2));
+
+  const result = await httpPost(url, headers, JSON.stringify(requestBody));
+  return extractTopnList(result, '攻击源地理位置 TopN');
+}
+
+async function fetchTopnDstIps(cookieInfo, params, loadCondition) {
+  const { cookieString, csrfToken } = cookieInfo;
+
+  const requestBody = buildTopnRequestBody(params, loadCondition, {
+    ipType: 'dst_ip',
+    topn: 5
+  });
+  const headers = generateHeaders(cookieString, csrfToken);
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.topnDstIpEndpoint}`;
+
+  console.log(`[ApiClient] 请求目的 IP TopN 参数:`, JSON.stringify(requestBody, null, 2));
+
+  const result = await httpPost(url, headers, JSON.stringify(requestBody));
+  return extractTopnList(result, '目的 IP TopN');
+}
+
+async function fetchTopnReportStats(cookieInfo, params) {
+  const loadCondition = await fetchTopnLoadCondition(cookieInfo, params);
+  const [threatTypes, srcIpGeos, dstIps] = await Promise.all([
+    fetchTopnThreatTypes(cookieInfo, params, loadCondition),
+    fetchTopnSrcIpGeos(cookieInfo, params, loadCondition),
+    fetchTopnDstIps(cookieInfo, params, loadCondition)
+  ]);
+
+  return {
+    threatTypes,
+    srcIpGeos,
+    dstIps
+  };
 }
 
 async function visitHomePage(cookieInfo) {
@@ -1282,6 +1468,9 @@ module.exports = {
   buildRequestBody,
   buildAlarmRequestBody,
   buildVulnRequestBody,
+  buildWeakPwdSummaryRequestBody,
+  buildTopnLoadConditionRequestBody,
+  buildTopnRequestBody,
   buildAssetDownloadRequestBody,
   buildExposedTargetCompanyOptionRequestBody,
   buildExposedExportRequestBody,
@@ -1302,6 +1491,12 @@ module.exports = {
   fetchEventTable,
   fetchAlarmTable,
   fetchVulnTable,
+  fetchWeakPwdSummaryTotal,
+  fetchTopnLoadCondition,
+  fetchTopnThreatTypes,
+  fetchTopnSrcIpGeos,
+  fetchTopnDstIps,
+  fetchTopnReportStats,
   visitHomePage,
   fetchExposedTargetCompanyOptions,
   fetchExposedSurfaceExportInfo,

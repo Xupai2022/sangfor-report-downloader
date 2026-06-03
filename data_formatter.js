@@ -683,6 +683,84 @@ function toText(value) {
   return String(value).trim();
 }
 
+function getEventManageSubTypeName(row) {
+  if (!row || typeof row !== 'object') return '';
+  return toText(
+    row.__manageSubTypeDisplay
+    || row.manage_sub_type_cn
+    || row.manage_sub_type_name
+    || row['事件二级类型']
+    || row['二级类型']
+  );
+}
+
+function buildTopEventManageSubTypeStats(eventRows, limit = 5) {
+  const counts = new Map();
+  (Array.isArray(eventRows) ? eventRows : []).forEach((row) => {
+    const name = getEventManageSubTypeName(row);
+    if (!name) return;
+    const current = counts.get(name);
+    if (current) {
+      current.count += 1;
+    } else {
+      counts.set(name, { name, count: 1, firstIndex: counts.size });
+    }
+  });
+
+  return Array.from(counts.values())
+    .sort((a, b) => {
+      if (b.count !== a.count) return b.count - a.count;
+      return a.firstIndex - b.firstIndex;
+    })
+    .map(({ name, count }) => ({ name, count }))
+    .slice(0, limit);
+}
+
+function buildTopnReportCells(topnReportStats) {
+  const cells = {};
+  const srcIpGeos = Array.isArray((topnReportStats || {}).srcIpGeos)
+    ? topnReportStats.srcIpGeos
+    : [];
+  const threatTypes = Array.isArray((topnReportStats || {}).threatTypes)
+    ? topnReportStats.threatTypes
+    : [];
+  const dstIps = Array.isArray((topnReportStats || {}).dstIps)
+    ? topnReportStats.dstIps
+    : [];
+
+  srcIpGeos.slice(0, 5).forEach((item, index) => {
+    const row = 62 + index;
+    const name = toText((item || {}).src_ip_geo);
+    if (name) cells[`F${row}`] = name;
+    if ((item || {}).attack_count !== undefined && (item || {}).attack_count !== null) {
+      const count = toNumericOrNull(item.attack_count);
+      cells[`G${row}`] = count === null ? item.attack_count : count;
+    }
+  });
+
+  threatTypes.slice(0, 5).forEach((item, index) => {
+    const row = 62 + index;
+    const name = toText((item || {}).threat_type);
+    if (name) cells[`I${row}`] = name;
+    if ((item || {}).attack_count !== undefined && (item || {}).attack_count !== null) {
+      const count = toNumericOrNull(item.attack_count);
+      cells[`J${row}`] = count === null ? item.attack_count : count;
+    }
+  });
+
+  dstIps.slice(0, 5).forEach((item, index) => {
+    const row = 62 + index;
+    const name = toText((item || {}).dst_ip);
+    if (name) cells[`L${row}`] = name;
+    if ((item || {}).attack_count !== undefined && (item || {}).attack_count !== null) {
+      const count = toNumericOrNull(item.attack_count);
+      cells[`M${row}`] = count === null ? item.attack_count : count;
+    }
+  });
+
+  return cells;
+}
+
 function toNumericOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   if (typeof value === 'number') {
@@ -853,6 +931,8 @@ function buildStatisticsCells(statsContext) {
     assetWorksheet = null,
     exposedSurfaceWorksheet = null,
     exposedSurfacePortCount = '',
+    weakPwdSummaryTotal = 0,
+    topnReportStats = null,
     xdrIn2outLogSearchCount = '',
     xdrOut2inLogSearchCount = '',
     xdrMonthlyIn2outLogSearchCounts = [],
@@ -1067,9 +1147,30 @@ function buildStatisticsCells(statsContext) {
   const g4 = eventStats && eventStats.strategyOptimizeCount !== undefined
     ? eventStats.strategyOptimizeCount
     : '';
-  const eventSceneCounts = eventStats && eventStats.sceneCounts ? eventStats.sceneCounts : {};
+  const e80WeakPwdTotal = toNumericOrNull(weakPwdSummaryTotal) || 0;
+  const e80AccountSecurityEventCount = toNumericOrNull(
+    eventStats && eventStats.accountSecurityEventCountForE80
+  ) || 0;
+  const e80 = e80WeakPwdTotal + e80AccountSecurityEventCount;
+  const topEventManageSubTypeStats = buildTopEventManageSubTypeStats(eventRows, 5);
+  const topEventManageSubTypeCells = {};
+  for (let index = 0; index < 5; index += 1) {
+    const row = 51 + index;
+    const item = topEventManageSubTypeStats[index];
+    if (item) {
+      topEventManageSubTypeCells[`C${row}`] = item.name;
+      topEventManageSubTypeCells[`D${row}`] = item.count;
+    }
+  }
+  const topnReportCells = buildTopnReportCells(topnReportStats);
   const monthTrendCells = {};
   const blankTrendCells = [];
+  for (let row = 51; row <= 55; row += 1) {
+    blankTrendCells.push(`C${row}`, `D${row}`);
+  }
+  for (let row = 62; row <= 66; row += 1) {
+    blankTrendCells.push(`F${row}`, `G${row}`, `I${row}`, `J${row}`, `L${row}`, `M${row}`);
+  }
   for (let i = 0; i < 12; i += 1) {
     const col = XLSX.utils.encode_col(2 + i);
     const month = addMonths(startMonth, i);
@@ -1188,11 +1289,7 @@ function buildStatisticsCells(statsContext) {
     D49: g8,
     E49: e49,
     F49: g9,
-    D51: eventSceneCounts.penetrationFramework || 0,
-    D52: eventSceneCounts.trojan || 0,
-    D53: eventSceneCounts.proxyTool || 0,
-    D54: eventSceneCounts.mining || 0,
-    D55: eventSceneCounts.accountSecurity || 0,
+    ...topEventManageSubTypeCells,
     G51: averageAnnouncedEventDuration('识别时长'),
     G52: averageAnnouncedEventDuration('响应时长'),
     G53: averageAnnouncedEventDuration('遏制时长'),
@@ -1208,25 +1305,11 @@ function buildStatisticsCells(statsContext) {
     D66: '',
     D67: d11,
     D68: d12,
-    G62: '',
-    G63: '',
-    G64: '',
-    G65: '',
-    G66: '',
-    J62: '',
-    J63: '',
-    J64: '',
-    J65: '',
-    J66: '',
+    ...topnReportCells,
     M61: '',
-    M62: '',
-    M63: '',
-    M64: '',
-    M65: '',
-    M66: '',
     C80: c80,
     D80: d80,
-    E80: '',
+    E80: e80,
     F80: f80,
     D83: d83,
     D84: d84,
@@ -1317,6 +1400,8 @@ function generateReport(options) {
     assetWorkbookBuffer,
     exposedSurfaceWorkbookBuffer,
     exposedSurfacePortCount,
+    weakPwdSummaryTotal,
+    topnReportStats,
     eventData,
     eventStats,
     alarmData,
@@ -1380,6 +1465,8 @@ function generateReport(options) {
       assetWorksheet,
       exposedSurfaceWorksheet,
       exposedSurfacePortCount,
+      weakPwdSummaryTotal,
+      topnReportStats,
       xdrIn2outLogSearchCount,
       xdrOut2inLogSearchCount,
       xdrMonthlyIn2outLogSearchCounts,

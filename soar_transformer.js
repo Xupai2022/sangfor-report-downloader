@@ -344,6 +344,13 @@ function stringifyEnumKey(value) {
   return String(value);
 }
 
+function decodeUnicodeEscapes(value) {
+  if (value === null || value === undefined) return '';
+  const text = String(value).trim();
+  if (!text) return '';
+  return text.replace(/\\u([0-9a-fA-F]{4})/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)));
+}
+
 function pickLastArrayValue(value) {
   if (Array.isArray(value)) {
     if (value.length === 0) return '';
@@ -404,6 +411,19 @@ function buildTypeDisplay(primary, secondary, separator) {
   const secondaryText = secondary === null || secondary === undefined || secondary === '' ? null : String(secondary);
   if (primaryText && secondaryText) return `${primaryText}${separator}${secondaryText}`;
   return primaryText || secondaryText || '';
+}
+
+function resolveManageTypeDisplay(eventDoc) {
+  const manageTypeDisplay = decodeUnicodeEscapes(eventDoc.manage_type_cn);
+  if (manageTypeDisplay) return manageTypeDisplay;
+  const manageType = stringifyEnumKey(eventDoc.manage_type);
+  return EVENT_MANAGE_TYPE_DISPLAY[manageType] ?? (manageType || '');
+}
+
+function isUndeclaredThreatManageType(eventDoc) {
+  const manageType = stringifyEnumKey(eventDoc.manage_type);
+  const manageTypeDisplay = resolveManageTypeDisplay(eventDoc);
+  return manageType === 'UNDECLARED_THREAT' || manageTypeDisplay.includes('未公开威胁');
 }
 
 function parseDateTime(value) {
@@ -582,6 +602,10 @@ function formatVulnHighAvailability(value) {
 }
 
 function resolveEventGradingTag5Rule(eventDoc) {
+  if (isUndeclaredThreatManageType(eventDoc)) {
+    return { ignore: false, eventGradingTag: LATEST_THREAT_TYPE, strategyOptimizeCount: 0 };
+  }
+
   if (stringifyEnumKey(eventDoc.event_grading_tag) !== '5') {
     return { ignore: false, strategyOptimizeCount: 0 };
   }
@@ -618,8 +642,8 @@ function resolveEventGradingTag5Rule(eventDoc) {
 }
 
 function transformEventDoc(eventDoc, ctx, overrides = {}) {
-  const manageTypeDisplay = EVENT_MANAGE_TYPE_DISPLAY[stringifyEnumKey(eventDoc.manage_type)] ?? eventDoc.manage_type;
-  const manageSubTypeDisplay = ctx.manageSubTypeMap[stringifyEnumKey(eventDoc.manage_sub_type)] ?? eventDoc.manage_sub_type;
+  const manageTypeDisplay = resolveManageTypeDisplay(eventDoc);
+  const manageSubTypeDisplay = decodeUnicodeEscapes(eventDoc.manage_sub_type_cn);
   const rawTag = EVENT_GRADING_TAG_DISPLAY[eventDoc.event_grading_tag] ?? eventDoc.event_grading_tag;
   const eventGradingTag = overrides.eventGradingTag ?? rawTag;
 
@@ -646,6 +670,12 @@ function transformEventDoc(eventDoc, ctx, overrides = {}) {
     wechat_push_time: eventDoc.wechat_push_time
   };
 
+  Object.defineProperty(transformed, '__manageSubTypeDisplay', {
+    value: manageSubTypeDisplay,
+    enumerable: false,
+    configurable: true
+  });
+
   transformed['识别时长'] = calcRecognitionDurationMinutes({ ...eventDoc, event_grading_tag: transformed.event_grading_tag });
   transformed['响应时长'] = calcAccessDurationMinutes({ ...eventDoc, event_grading_tag: transformed.event_grading_tag });
   transformed['遏制时长'] = calcContainmentDurationMinutes({ ...eventDoc, event_grading_tag: transformed.event_grading_tag });
@@ -656,14 +686,8 @@ function transformEventDoc(eventDoc, ctx, overrides = {}) {
 }
 
 function transformAlarmDoc(alarmDoc, ctx) {
-  const manageTypeDisplay = EVENT_MANAGE_TYPE_DISPLAY[stringifyEnumKey(alarmDoc.manage_type)]
-    ?? alarmDoc.manage_type_name
-    ?? alarmDoc.manage_type
-    ?? '';
-  const manageSubTypeDisplay = ctx.manageSubTypeMap[stringifyEnumKey(alarmDoc.manage_sub_type)]
-    ?? alarmDoc.manage_sub_type_name
-    ?? alarmDoc.manage_sub_type
-    ?? '';
+  const manageTypeDisplay = decodeUnicodeEscapes(alarmDoc.manage_type_cn);
+  const manageSubTypeDisplay = decodeUnicodeEscapes(alarmDoc.manage_sub_type_cn);
 
   return {
     alarm_name: alarmDoc.title ?? alarmDoc.alarm_name ?? '',
@@ -708,7 +732,6 @@ function transformEventDocs(eventDocs, options = {}) {
 
 function transformEventDocsWithStats(eventDocs, options = {}) {
   const ctx = {
-    manageSubTypeMap: loadManageSubTypeMap(options.manageSubTypeMapFile),
     securityDomainByIp: options.assetWorkbookBuffer
       ? loadAssetSecurityDomainMapFromBuffer(options.assetWorkbookBuffer)
       : loadAssetSecurityDomainMap(options.assetMapFile)
@@ -716,9 +739,9 @@ function transformEventDocsWithStats(eventDocs, options = {}) {
 
   const stats = {
     strategyOptimizeCount: 0,
-    sceneCounts: createEmptyEventSceneStats()
+    sceneCounts: createEmptyEventSceneStats(),
+    accountSecurityEventCountForE80: 0
   };
-  const sceneStatSets = createEventSceneStatSets(ctx.manageSubTypeMap);
   const rows = [];
 
   for (const doc of eventDocs || []) {
@@ -730,10 +753,14 @@ function transformEventDocsWithStats(eventDocs, options = {}) {
     });
     rows.push(transformed);
 
+    const manageSubTypeDisplay = decodeUnicodeEscapes(doc.manage_sub_type_cn);
+    if (manageSubTypeDisplay.includes('账号安全')) {
+      stats.accountSecurityEventCountForE80 += 1;
+    }
+
     if (isEventCategoryTag(transformed.event_grading_tag)) {
-      const manageSubType = stringifyEnumKey(doc.manage_sub_type);
-      for (const [key, values] of Object.entries(sceneStatSets)) {
-        if (manageSubType !== null && values.has(manageSubType)) {
+      for (const [key, targetName] of Object.entries(EVENT_SCENE_STAT_NAMES)) {
+        if (manageSubTypeDisplay === targetName) {
           stats.sceneCounts[key] += 1;
         }
       }
@@ -744,9 +771,7 @@ function transformEventDocsWithStats(eventDocs, options = {}) {
 }
 
 function transformAlarmDocs(alarmDocs, options = {}) {
-  const ctx = {
-    manageSubTypeMap: loadManageSubTypeMap(options.manageSubTypeMapFile)
-  };
+  const ctx = {};
   return (alarmDocs || []).map(doc => transformAlarmDoc(doc, ctx));
 }
 

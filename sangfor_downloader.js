@@ -490,6 +490,8 @@ async function downloadReports(options) {
       alarmData: null,
       vulnData: null,
       exposedSurfacePortCount: null,
+      weakPwdSummaryTotal: null,
+      topnReportStats: null,
       xdrLogSearchCount: null,
       xdrIn2outLogSearchCount: null,
       xdrOut2inLogSearchCount: null,
@@ -500,6 +502,8 @@ async function downloadReports(options) {
       eventError: null,
       alarmError: null,
       vulnError: null,
+      weakPwdError: null,
+      topnError: null,
       xdrError: null
     };
     
@@ -602,6 +606,39 @@ async function downloadReports(options) {
         throw new Error('缺少 xlsx 依赖。请在当前目录执行 npm install 后重试。');
       }
       throw error;
+    }
+
+    console.log('\n--- 查询弱口令统计 ---');
+    try {
+      results.weakPwdSummaryTotal = await requestWithRetry(
+        (params) => apiClient.fetchWeakPwdSummaryTotal(cookieInfo, params),
+        requestParams
+      );
+      console.log(`[成功] 弱口令统计: ${results.weakPwdSummaryTotal}`);
+    } catch (error) {
+      results.weakPwdError = error.message;
+      throw new Error(`弱口令统计失败: ${error.message}`);
+    }
+
+    console.log('\n--- 查询 SOAR TopN 统计 ---');
+    try {
+      results.topnReportStats = await requestWithRetry(
+        (params) => apiClient.fetchTopnReportStats(cookieInfo, params),
+        requestParams
+      );
+      const threatCount = Array.isArray(results.topnReportStats.threatTypes)
+        ? results.topnReportStats.threatTypes.length
+        : 0;
+      const geoCount = Array.isArray(results.topnReportStats.srcIpGeos)
+        ? results.topnReportStats.srcIpGeos.length
+        : 0;
+      const dstIpCount = Array.isArray(results.topnReportStats.dstIps)
+        ? results.topnReportStats.dstIps.length
+        : 0;
+      console.log(`[成功] SOAR TopN 统计: 威胁类型 ${threatCount} 条，攻击源地理位置 ${geoCount} 条，目的 IP ${dstIpCount} 条`);
+    } catch (error) {
+      results.topnError = error.message;
+      throw new Error(`SOAR TopN 统计失败: ${error.message}`);
     }
 
     console.log('\n--- 查询 XDR 重保日志统计 ---');
@@ -708,6 +745,8 @@ async function downloadReports(options) {
       assetWorkbookBuffer: results.assetWorkbookBuffer,
       exposedSurfaceWorkbookBuffer: results.exposedSurfaceWorkbookBuffer,
       exposedSurfacePortCount: results.exposedSurfacePortCount,
+      weakPwdSummaryTotal: results.weakPwdSummaryTotal,
+      topnReportStats: results.topnReportStats,
       reportTemplatePath: options.reportTemplatePath,
       eventData: transformedEventData,
       eventStats: transformedEventResult ? transformedEventResult.stats : null,
