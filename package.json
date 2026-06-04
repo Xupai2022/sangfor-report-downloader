@@ -7,7 +7,8 @@
   "scripts": {
     "response:event": "node sangfor_downloader.js --response-only --type event",
     "response:alarm": "node sangfor_downloader.js --response-only --type alarm",
-    "start": "node sangfor_downloader.js"
+    "start": "node sangfor_downloader.js",
+    "test": "node tests/protection_atomic.test.js"
   },
   "dependencies": {
     "xlsx": "^0.18.5"

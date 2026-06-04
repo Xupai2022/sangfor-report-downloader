@@ -521,6 +521,15 @@ function formatReportDateRange(startDate, endDate) {
   return `${formatReportDate(startDate)}-${formatReportDate(endDate)}`;
 }
 
+function formatIsoDate(date) {
+  const parsed = parseReportDateValue(date);
+  if (!parsed) return '';
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function buildProtectionPeriods(statsContext, reportRange) {
   const periods = [];
   const protectStartDate = statsContext.protectStartDate
@@ -552,6 +561,54 @@ function buildProtectionPeriods(statsContext, reportRange) {
   return periods;
 }
 
+function clipProtectionPeriodsToReportRange(statsContext, reportRange) {
+  return buildProtectionPeriods(statsContext, reportRange)
+    .map((period) => {
+      if (!period.range) return null;
+      const startMs = Math.max(period.range.start.getTime(), reportRange.start.getTime());
+      const endMs = Math.min(period.range.end.getTime(), reportRange.end.getTime());
+      if (startMs > endMs) return null;
+      const range = {
+        start: new Date(startMs),
+        end: new Date(endMs)
+      };
+      const originalStartDate = period.startDate;
+      const originalEndDate = period.endDate;
+      const startDate = formatIsoDate(range.start);
+      const endDate = formatIsoDate(range.end);
+      return {
+        ...period,
+        originalStartDate,
+        originalEndDate,
+        startDate,
+        endDate,
+        key: buildProtectionPeriodKey(period, originalStartDate, originalEndDate),
+        dayCount: countInclusiveNaturalDays(range.start, range.end),
+        range
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildProtectionPeriodKey(period, startDate, endDate) {
+  const source = period && period.source ? period.source : 'unknown';
+  const name = period && period.name ? period.name : '';
+  return `${source}:${name}:${formatIsoDate(startDate)}~${formatIsoDate(endDate)}`;
+}
+
+function startOfNaturalDay(date) {
+  const parsed = parseReportDateValue(date);
+  if (!parsed) return null;
+  return new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0);
+}
+
+function countInclusiveNaturalDays(startDate, endDate) {
+  const startDay = startOfNaturalDay(startDate);
+  const endDay = startOfNaturalDay(endDate);
+  if (!startDay || !endDay || startDay > endDay) return 0;
+  return Math.round((endDay.getTime() - startDay.getTime()) / 86400000) + 1;
+}
+
 function mergeInclusiveRanges(periods) {
   const ranges = periods
     .map(period => period.range)
@@ -575,27 +632,62 @@ function mergeInclusiveRanges(periods) {
 
 function buildProtectionSecondRanges(statsContext) {
   const reportRange = buildInclusiveDateRange(statsContext.startDate, statsContext.endDate);
-  const periods = buildProtectionPeriods(statsContext, reportRange);
-  const clippedPeriods = periods
-    .map((period) => {
-      if (!period.range) return null;
-      const startMs = Math.max(period.range.start.getTime(), reportRange.start.getTime());
-      const endMs = Math.min(period.range.end.getTime(), reportRange.end.getTime());
-      if (startMs > endMs) return null;
-      return {
-        ...period,
-        range: {
-          start: new Date(startMs),
-          end: new Date(endMs)
-        }
-      };
-    })
-    .filter(Boolean);
+  const clippedPeriods = clipProtectionPeriodsToReportRange(statsContext, reportRange);
 
   return mergeInclusiveRanges(clippedPeriods).map(range => ({
     start: Math.floor(range.startMs / 1000),
     end: Math.floor(range.endMs / 1000)
   }));
+}
+
+function buildProtectionAtomicSecondRanges(statsContext) {
+  const reportRange = buildInclusiveDateRange(statsContext.startDate, statsContext.endDate);
+  const periods = clipProtectionPeriodsToReportRange(statsContext, reportRange);
+  const holidayPeriods = periods.filter(period => period.source === 'holiday');
+
+  if (periods.length === 0) {
+    return {
+      ranges: [],
+      holidayPeriods
+    };
+  }
+
+  const boundaries = new Set();
+  periods.forEach((period) => {
+    boundaries.add(period.range.start.getTime());
+    boundaries.add(period.range.end.getTime() + 1);
+  });
+
+  const sortedBoundaries = Array.from(boundaries).sort((a, b) => a - b);
+  const ranges = [];
+  for (let index = 0; index < sortedBoundaries.length - 1; index += 1) {
+    const startMs = sortedBoundaries[index];
+    const endMs = sortedBoundaries[index + 1] - 1;
+    if (startMs > endMs) continue;
+
+    const owners = periods
+      .filter(period => period.range.start.getTime() <= startMs && period.range.end.getTime() >= endMs)
+      .map(period => ({
+        source: period.source,
+        name: period.name,
+        key: period.key
+      }));
+
+    if (owners.length === 0) continue;
+
+    ranges.push({
+      start: Math.floor(startMs / 1000),
+      end: Math.floor(endMs / 1000),
+      startDate: formatIsoDate(new Date(startMs)),
+      endDate: formatIsoDate(new Date(endMs)),
+      owners
+    });
+  }
+
+  return {
+    ranges,
+    holidayPeriods
+  };
 }
 
 function buildReportSecondRange(statsContext) {
@@ -937,11 +1029,12 @@ function buildStatisticsCells(statsContext) {
     xdrOut2inLogSearchCount = '',
     xdrMonthlyIn2outLogSearchCounts = [],
     xdrMonthlyOut2inLogSearchCounts = [],
-    xdrLogSearchCount = ''
+    xdrLogSearchCount = '',
+    xdrHolidayLogSearchCounts = {}
   } = statsContext || {};
 
   const range = buildInclusiveDateRange(startDate, endDate);
-  const protectionPeriods = buildProtectionPeriods(
+  const protectionPeriods = clipProtectionPeriodsToReportRange(
     Object.assign({}, statsContext, { protectStartDate, protectEndDate }),
     range
   );
@@ -1239,11 +1332,23 @@ function buildStatisticsCells(statsContext) {
     holidayCells[`M${row}`] = formatReportDateRange(period.startDate, period.endDate);
   });
   const holidaySummaryCells = {};
+  const holidaySummaryBlankCells = [];
   for (let row = 91; row <= 97; row += 1) {
     holidaySummaryCells[`F${row}`] = '';
+    holidaySummaryCells[`G${row}`] = '';
+    holidaySummaryCells[`H${row}`] = '';
+    holidaySummaryBlankCells.push(`F${row}`, `G${row}`, `H${row}`);
   }
   holidayPeriods.slice(0, 7).forEach((period, index) => {
-    holidaySummaryCells[`F${91 + index}`] = `${period.name}（${formatReportDateRange(period.startDate, period.endDate)}）`;
+    const row = 91 + index;
+    holidaySummaryCells[`F${row}`] = `${period.name}（${formatReportDateRange(period.startDate, period.endDate)}）`;
+    const count = xdrHolidayLogSearchCounts && Object.prototype.hasOwnProperty.call(xdrHolidayLogSearchCounts, period.key)
+      ? toNumericOrNull(xdrHolidayLogSearchCounts[period.key])
+      : null;
+    holidaySummaryCells[`G${row}`] = count !== null && period.dayCount > 0
+      ? roundTo(count / period.dayCount, 2)
+      : '';
+    holidaySummaryCells[`H${row}`] = '100%';
   });
 
   const cells = {
@@ -1334,20 +1439,6 @@ function buildStatisticsCells(statsContext) {
     D91: d29,
     D92: '100%',
     ...holidaySummaryCells,
-    G91: '',
-    G92: '',
-    G93: '',
-    G94: '',
-    G95: '',
-    G96: '',
-    G97: '',
-    H91: '100%',
-    H92: '100%',
-    H93: '100%',
-    H94: '100%',
-    H95: '100%',
-    H96: '100%',
-    H97: '100%',
     G4: g4,
     G5: g5,
     G6: g6,
@@ -1357,7 +1448,7 @@ function buildStatisticsCells(statsContext) {
     G11: g11,
     G12: g12
   };
-  cells.__blankCells = blankTrendCells;
+  cells.__blankCells = blankTrendCells.concat(holidaySummaryBlankCells);
   return cells;
 }
 
@@ -1412,6 +1503,7 @@ function generateReport(options) {
     xdrMonthlyIn2outLogSearchCounts,
     xdrMonthlyOut2inLogSearchCounts,
     xdrLogSearchCount,
+    xdrHolidayLogSearchCounts,
     outputDir,
     eventHeaders,
     alarmHeaders,
@@ -1471,7 +1563,8 @@ function generateReport(options) {
       xdrOut2inLogSearchCount,
       xdrMonthlyIn2outLogSearchCounts,
       xdrMonthlyOut2inLogSearchCounts,
-      xdrLogSearchCount
+      xdrLogSearchCount,
+      xdrHolidayLogSearchCounts
     });
 
     ensureOutputDir(reportFilePath);
@@ -1545,9 +1638,11 @@ module.exports = {
   saveToExcel,
   formatReportDate,
   parseReportDateValue,
+  countInclusiveNaturalDays,
   buildReportSecondRange,
   buildReportMonthSecondRanges,
   buildProtectionSecondRanges,
+  buildProtectionAtomicSecondRanges,
   buildStatisticsCells,
   populateStatisticsSheet,
   generateReport,

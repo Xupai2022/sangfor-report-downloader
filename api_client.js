@@ -1437,6 +1437,70 @@ async function fetchXdrLogSearchCountForRanges(cookieInfo, ranges, params = {}) 
   return total;
 }
 
+function aggregateXdrLogSearchCountDetails(queriedRanges) {
+  const summary = {
+    total: 0,
+    holidayCounts: {}
+  };
+
+  (Array.isArray(queriedRanges) ? queriedRanges : []).forEach((range) => {
+    const count = Number(range && range.count);
+    if (!Number.isFinite(count)) return;
+    summary.total += count;
+
+    (Array.isArray(range.owners) ? range.owners : [])
+      .filter(owner => owner && owner.source === 'holiday' && owner.key)
+      .forEach((owner) => {
+        summary.holidayCounts[owner.key] = (summary.holidayCounts[owner.key] || 0) + count;
+      });
+  });
+
+  return summary;
+}
+
+async function fetchXdrLogSearchCountDetailsForRanges(cookieInfo, ranges, params = {}) {
+  if (!Array.isArray(ranges) || ranges.length === 0) {
+    console.log('[ApiClient] XDR 重保时间段为空，count 记为 0');
+    return {
+      total: 0,
+      holidayCounts: {},
+      queriedRanges: []
+    };
+  }
+
+  const queriedRanges = [];
+  for (let index = 0; index < ranges.length; index += 1) {
+    const range = ranges[index];
+    const ownerText = Array.isArray(range.owners) && range.owners.length > 0
+      ? range.owners.map(owner => `${owner.source}:${owner.name}`).join(',')
+      : 'unknown';
+    console.log(`[ApiClient] XDR count 查询 ${index + 1}/${ranges.length}: ${range.start} ~ ${range.end} owners=${ownerText}`);
+    const count = await fetchXdrLogSearchCount(cookieInfo, range);
+    queriedRanges.push({
+      start: range.start,
+      end: range.end,
+      startDate: range.startDate,
+      endDate: range.endDate,
+      owners: Array.isArray(range.owners) ? range.owners : [],
+      count
+    });
+    const partialSummary = aggregateXdrLogSearchCountDetails(queriedRanges);
+    console.log(`[ApiClient] XDR count 本段 ${count}，累计 ${partialSummary.total}`);
+
+    const delayMs = Number.isFinite(params.pageDelayMs) ? params.pageDelayMs : 10;
+    if (delayMs > 0 && index < ranges.length - 1) {
+      await sleep(delayMs);
+    }
+  }
+
+  const summary = aggregateXdrLogSearchCountDetails(queriedRanges);
+  return {
+    total: summary.total,
+    holidayCounts: summary.holidayCounts,
+    queriedRanges
+  };
+}
+
 async function fetchXdrIn2outLogSearchCountForRanges(cookieInfo, ranges, params = {}) {
   if (!Array.isArray(ranges) || ranges.length === 0) {
     console.log('[ApiClient] XDR in2out 重保时间段为空，count 记为 0');
@@ -1510,6 +1574,8 @@ module.exports = {
   fetchAllPages,
   fetchXdrLogSearchCount,
   fetchXdrLogSearchCountForRanges,
+  aggregateXdrLogSearchCountDetails,
+  fetchXdrLogSearchCountDetailsForRanges,
   fetchXdrAccessDirectionLogSearchCount,
   fetchXdrIn2outLogSearchCount,
   fetchXdrOut2inLogSearchCount,

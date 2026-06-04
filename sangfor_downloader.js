@@ -11,7 +11,6 @@
  *   node sangfor_downloader.js --type vuln                        # 只下载资产漏洞表
  *   node sangfor_downloader.js --type exposed                     # 只下载暴露面
  */
-
 const path = require('path');
 const fs = require('fs');
 
@@ -493,6 +492,8 @@ async function downloadReports(options) {
       weakPwdSummaryTotal: null,
       topnReportStats: null,
       xdrLogSearchCount: null,
+      xdrHolidayLogSearchCounts: {},
+      xdrProtectionQueriedRanges: [],
       xdrIn2outLogSearchCount: null,
       xdrOut2inLogSearchCount: null,
       xdrMonthlyIn2outLogSearchCounts: [],
@@ -651,15 +652,16 @@ async function downloadReports(options) {
         startDate: options.startDate,
         endDate: options.endDate
       });
-      const protectionRanges = dataFormatter.buildProtectionSecondRanges({
+      const protectionQuery = dataFormatter.buildProtectionAtomicSecondRanges({
         startDate: options.startDate,
         endDate: options.endDate,
         protectStartDate: options.protectStartDate,
         protectEndDate: options.protectEndDate
       });
+      const protectionRanges = protectionQuery.ranges;
       console.log(`[XDR] in2out/out2in 查询时间段: ${reportRange.start} ~ ${reportRange.end}`);
       console.log(`[XDR] 月度 in2out/out2in 查询时间段: ${reportMonthRanges.length} 段`);
-      console.log(`[XDR] 重保查询时间段: ${protectionRanges.length} 段`);
+      console.log(`[XDR] 重保原子查询时间段: ${protectionRanges.length} 段`);
       const xdrCookieInfo = cookieReader.getCookieInfo(options.xdrCookiePath || CONFIG.xdrCookiePath);
       results.xdrIn2outLogSearchCount = await requestWithRetry(
         () => apiClient.fetchXdrIn2outLogSearchCount(xdrCookieInfo, reportRange),
@@ -697,19 +699,25 @@ async function downloadReports(options) {
       }
       if (protectionRanges.length === 0) {
         results.xdrLogSearchCount = 0;
+        results.xdrHolidayLogSearchCounts = {};
+        results.xdrProtectionQueriedRanges = [];
       } else {
-        results.xdrLogSearchCount = await requestWithRetry(
-          () => apiClient.fetchXdrLogSearchCountForRanges(xdrCookieInfo, protectionRanges, {
+        const xdrProtectionDetails = await requestWithRetry(
+          () => apiClient.fetchXdrLogSearchCountDetailsForRanges(xdrCookieInfo, protectionRanges, {
             pageDelayMs: options.pageDelayMs
           }),
           requestParams
         );
+        results.xdrLogSearchCount = xdrProtectionDetails.total;
+        results.xdrHolidayLogSearchCounts = xdrProtectionDetails.holidayCounts;
+        results.xdrProtectionQueriedRanges = xdrProtectionDetails.queriedRanges;
       }
       console.log(`[成功] XDR in2out 日志统计: ${results.xdrIn2outLogSearchCount}`);
       console.log(`[成功] XDR out2in 日志统计: ${results.xdrOut2inLogSearchCount}`);
       console.log(`[成功] XDR 月度 in2out 日志统计: ${results.xdrMonthlyIn2outLogSearchCounts.map(item => `${item.monthLabel}:${item.count}`).join(', ')}`);
       console.log(`[成功] XDR 月度 out2in 日志统计: ${results.xdrMonthlyOut2inLogSearchCounts.map(item => `${item.monthLabel}:${item.count}`).join(', ')}`);
       console.log(`[成功] XDR 重保日志统计: ${results.xdrLogSearchCount}`);
+      console.log(`[成功] XDR 节假日重保日志统计: ${Object.entries(results.xdrHolidayLogSearchCounts).map(([key, count]) => `${key}:${count}`).join(', ')}`);
     } catch (error) {
       results.xdrError = error.message;
       throw new Error(`XDR 重保日志统计失败: ${error.message}`);
@@ -754,6 +762,7 @@ async function downloadReports(options) {
       vulnData: transformedVulnData,
       vulnRawRowCount: Array.isArray(results.vulnData) ? results.vulnData.length : null,
       xdrLogSearchCount: results.xdrLogSearchCount,
+      xdrHolidayLogSearchCounts: results.xdrHolidayLogSearchCounts,
       xdrIn2outLogSearchCount: results.xdrIn2outLogSearchCount,
       xdrOut2inLogSearchCount: results.xdrOut2inLogSearchCount,
       xdrMonthlyIn2outLogSearchCounts: results.xdrMonthlyIn2outLogSearchCounts,
