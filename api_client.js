@@ -10,10 +10,24 @@ const zlib = require('zlib');
 const REQUEST_TIMEOUT_MS = 75000;
 const REQUEST_TIMEOUT_SECONDS = REQUEST_TIMEOUT_MS / 1000;
 
+function normalizeHost(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  const withScheme = raw.includes('://') ? raw : `https://${raw}`;
+  try {
+    return new URL(withScheme).hostname;
+  } catch (error) {
+    return raw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+  }
+}
+
 // API 配置
 const API_CONFIG = {
   baseUrl: 'soar.sangfor.com.cn',
-  xdrBaseUrl: 'xdr.sangfor.com.cn',
+  xdrBaseUrl: normalizeHost(process.env.SANGFOR_XDR_BASE_URL || 'xdr.sangfor.com.cn'),
   eventEndpoint: '/gateway/event-mgr/external/event_table',
   alarmEndpoint: '/gateway/alarm-mgr/v1/alarm_table/alarm_list',
   vulnEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/vuln_list_port_split',
@@ -23,6 +37,7 @@ const API_CONFIG = {
   exposedIpListStatisticsEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/exposed_surface_mss/ip_list_statistics',
   weakPwdSummaryEndpoint: '/gateway/vuln-manager/vm/order/v1/weak_pwd/summary_list',
   topnLoadConditionEndpoint: '/order/v1/tool_box/topn/load_condition',
+  topnDeviceListEndpoint: '/order/v1/tool_box/topn/device_list',
   topnThreatTypeEndpoint: '/order/v1/tool_box/topn/threat_type',
   topnSrcIpGeoEndpoint: '/order/v1/tool_box/topn/src_ip_geo',
   topnDstIpEndpoint: '/order/v1/tool_box/topn/dst_ip',
@@ -132,17 +147,23 @@ function generateHeaders(cookieString, csrfToken, overrides = {}) {
   };
 }
 
-function generateXdrHeaders(cookieString, csrfToken, overrides = {}) {
+function getXdrBaseUrl(cookieInfo = {}) {
+  return normalizeHost(cookieInfo.xdrBaseUrl || API_CONFIG.xdrBaseUrl);
+}
+
+function generateXdrHeaders(cookieString, csrfToken, overrides = {}, baseUrl = API_CONFIG.xdrBaseUrl) {
+  const xdrBaseUrl = normalizeHost(baseUrl || API_CONFIG.xdrBaseUrl);
+
   return {
-    'host': API_CONFIG.xdrBaseUrl,
+    'host': xdrBaseUrl,
     'accept': 'application/json, text/plain, */*',
     'accept-encoding': 'gzip, deflate, br',
     'accept-language': 'zh-CN,zh;q=0.9',
     'connection': 'keep-alive',
     'content-type': 'application/json',
     'cookie': cookieString,
-    'origin': 'https://xdr.sangfor.com.cn',
-    'referer': 'https://xdr.sangfor.com.cn/',
+    'origin': `https://${xdrBaseUrl}`,
+    'referer': `https://${xdrBaseUrl}/`,
     'sec-ch-ua': '"Chromium";v="148", "Google Chrome";v="148", "Not/A)Brand";v="99"',
     'sec-ch-ua-mobile': '?0',
     'sec-ch-ua-platform': '"Windows"',
@@ -587,6 +608,12 @@ function buildTopnLoadConditionRequestBody(params) {
   };
 }
 
+function buildTopnDeviceListRequestBody(params) {
+  return {
+    company_id: String(params.customerId || '')
+  };
+}
+
 function normalizeTopnConditionIds(ids) {
   if (!Array.isArray(ids)) return [];
   return ids
@@ -612,16 +639,35 @@ function normalizeTopnDeviceInfos(deviceInfos) {
     .filter(Boolean);
 }
 
-function buildTopnRequestBody(params, loadCondition, options = {}) {
+function normalizeTopnDeviceInfosFromDeviceList(deviceList) {
+  if (!Array.isArray(deviceList)) return [];
+  return deviceList
+    .map((deviceGroup) => {
+      const deviceType = String((deviceGroup || {}).device_type || '').trim();
+      const deviceIdList = Array.isArray((deviceGroup || {}).device_info_list)
+        ? deviceGroup.device_info_list
+          .map(deviceInfo => String((deviceInfo || {}).device_id || '').trim())
+          .filter(id => id)
+        : [];
+      if (!deviceType || deviceIdList.length === 0) return null;
+      return {
+        device_type: deviceType,
+        device_id_list: deviceIdList
+      };
+    })
+    .filter(Boolean);
+}
+
+function buildTopnRequestBody(params, topnCondition, options = {}) {
   const startTimestamp = dateToTimestamp(params.startTime);
   const endTimestamp = dateToTimestamp(params.endTime);
   const endOfDay = endTimestamp + 24 * 60 * 60 * 1000 - 1;
-  const conditionData = (loadCondition || {}).data || loadCondition || {};
+  const conditionData = (topnCondition || {}).data || topnCondition || {};
 
   return {
     company_id: String(params.customerId || ''),
-    attack_type: normalizeTopnConditionIds(conditionData.attack_type_ids),
-    attack_direction: normalizeTopnConditionIds(conditionData.attack_direction_ids),
+    attack_type: conditionData.attack_type || normalizeTopnConditionIds(conditionData.attack_type_ids),
+    attack_direction: conditionData.attack_direction || normalizeTopnConditionIds(conditionData.attack_direction_ids),
     ip_type: options.ipType || 'src_ip',
     topn: options.topn || 100,
     device_infos: normalizeTopnDeviceInfos(conditionData.device_infos),
@@ -939,6 +985,23 @@ async function fetchTopnLoadCondition(cookieInfo, params) {
   return result.data;
 }
 
+async function fetchTopnDeviceList(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+
+  const requestBody = buildTopnDeviceListRequestBody(params);
+  const headers = generateHeaders(cookieString, csrfToken);
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.topnDeviceListEndpoint}`;
+
+  console.log(`[ApiClient] 请求 TopN 设备列表参数:`, JSON.stringify(requestBody, null, 2));
+
+  const result = await httpPost(url, headers, JSON.stringify(requestBody));
+  if (!result || result.code !== 0 || !result.data || !Array.isArray(result.data.list)) {
+    throw new Error(`TopN 设备列表接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  return normalizeTopnDeviceInfosFromDeviceList(result.data.list);
+}
+
 function extractTopnList(result, label) {
   if (!result || result.code !== 0 || !result.data || !Array.isArray(result.data.list)) {
     throw new Error(`${label} 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
@@ -989,11 +1052,16 @@ async function fetchTopnDstIps(cookieInfo, params, loadCondition) {
 }
 
 async function fetchTopnReportStats(cookieInfo, params) {
-  const loadCondition = await fetchTopnLoadCondition(cookieInfo, params);
+  const deviceInfos = await fetchTopnDeviceList(cookieInfo, params);
+  const topnCondition = {
+    attack_type: [{ id: 'security_log' }],
+    attack_direction: [{ id: '1' }],
+    device_infos: deviceInfos
+  };
   const [threatTypes, srcIpGeos, dstIps] = await Promise.all([
-    fetchTopnThreatTypes(cookieInfo, params, loadCondition),
-    fetchTopnSrcIpGeos(cookieInfo, params, loadCondition),
-    fetchTopnDstIps(cookieInfo, params, loadCondition)
+    fetchTopnThreatTypes(cookieInfo, params, topnCondition),
+    fetchTopnSrcIpGeos(cookieInfo, params, topnCondition),
+    fetchTopnDstIps(cookieInfo, params, topnCondition)
   ]);
 
   return {
@@ -1366,8 +1434,9 @@ async function fetchXdrLogSearchCount(cookieInfo, params) {
     throw new Error(`XDR count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
   }
 
-  const url = `https://${API_CONFIG.xdrBaseUrl}${API_CONFIG.xdrLogSearchCountEndpoint}`;
-  const headers = generateXdrHeaders(cookieString, csrfToken);
+  const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrLogSearchCountEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
   const body = JSON.stringify(buildXdrLogSearchCountRequestBody(params));
   const result = await httpPost(url, headers, body);
 
@@ -1399,8 +1468,9 @@ async function fetchXdrAccessDirectionLogSearchCount(cookieInfo, params, accessD
     throw new Error(`XDR ${accessDirection} count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
   }
 
-  const url = `https://${API_CONFIG.xdrBaseUrl}${API_CONFIG.xdrLogSearchCountEndpoint}`;
-  const headers = generateXdrHeaders(cookieString, csrfToken);
+  const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrLogSearchCountEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
   const body = JSON.stringify(buildXdrAccessDirectionLogSearchCountRequestBody(params, accessDirection));
   const result = await httpPost(url, headers, body);
 
@@ -1534,6 +1604,7 @@ module.exports = {
   buildVulnRequestBody,
   buildWeakPwdSummaryRequestBody,
   buildTopnLoadConditionRequestBody,
+  buildTopnDeviceListRequestBody,
   buildTopnRequestBody,
   buildAssetDownloadRequestBody,
   buildExposedTargetCompanyOptionRequestBody,
@@ -1550,13 +1621,16 @@ module.exports = {
   extractXlsxFromZipOrSelf,
   extractRowsFromResponse,
   getTotalFromResponse,
+  normalizeHost,
   generateHeaders,
+  getXdrBaseUrl,
   generateXdrHeaders,
   fetchEventTable,
   fetchAlarmTable,
   fetchVulnTable,
   fetchWeakPwdSummaryTotal,
   fetchTopnLoadCondition,
+  fetchTopnDeviceList,
   fetchTopnThreatTypes,
   fetchTopnSrcIpGeos,
   fetchTopnDstIps,

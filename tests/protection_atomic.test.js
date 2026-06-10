@@ -286,6 +286,40 @@ function testStatisticsCellsManualOnlyLeavesHolidayAverageBlank() {
   assert.strictEqual(cells.H91, '');
 }
 
+function testStatisticsCellsG11UsesD6D10D12() {
+  const cells = dataFormatter.buildStatisticsCells({
+    startDate: '2026-03-01',
+    endDate: '2026-03-31',
+    vulnRows: [
+      { '更新时间': '2026-03-01' },
+      { '更新时间': '2026-03-31 23:59:59' },
+      { '更新时间': '2026-04-01' }
+    ],
+    eventRows: [
+      {
+        create_time: '2026-03-10',
+        type: '未公开威胁',
+        affected_assets: ['10.0.0.1', '10.0.0.2', '10.0.0.2']
+      },
+      {
+        create_time: '2026-04-01',
+        type: '未公开威胁',
+        affected_assets: ['10.0.0.3']
+      }
+    ],
+    weakPwdSummaryTotal: 3,
+    eventStats: {
+      accountSecurityEventCountForE80: 4
+    }
+  });
+
+  assert.strictEqual(cells.D6, 2);
+  assert.strictEqual(cells.D10, 7);
+  assert.strictEqual(cells.D12, 2);
+  assert.strictEqual(cells.E80, 7);
+  assert.strictEqual(cells.G11, 11);
+}
+
 function testPopulateStatisticsSheetWritesAndClearsHolidayAverages() {
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([]);
@@ -334,6 +368,7 @@ const tests = [
   testStatisticsCellsIntegerHolidayDailyAverage,
   testStatisticsCellsMissingHolidayCountLeavesAverageBlank,
   testStatisticsCellsManualOnlyLeavesHolidayAverageBlank,
+  testStatisticsCellsG11UsesD6D10D12,
   testPopulateStatisticsSheetWritesAndClearsHolidayAverages
 ];
 

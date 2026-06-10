@@ -1222,7 +1222,6 @@ function buildStatisticsCells(statsContext) {
     && toText(row.event_status) === '不处置'
   )).length;
   const g9 = g7 > 0 ? formatRatioAsPercentage((g9HandledCount + g9IgnoredCount) / g7, 2) : '0%';
-  const g11 = `${d6 + d12}+弱口令数量`;
   const g12 = eventRows.filter((row) => (
     isDateInRange(row.create_time, range)
     && isStatisticsEventCountType(row.event_grading_tag)
@@ -1245,6 +1244,8 @@ function buildStatisticsCells(statsContext) {
     eventStats && eventStats.accountSecurityEventCountForE80
   ) || 0;
   const e80 = e80WeakPwdTotal + e80AccountSecurityEventCount;
+  const d10 = e80;
+  const g11 = d6 + d10 + d12;
   const topEventManageSubTypeStats = buildTopEventManageSubTypeStats(eventRows, 5);
   const topEventManageSubTypeCells = {};
   for (let index = 0; index < 5; index += 1) {
@@ -1364,7 +1365,7 @@ function buildStatisticsCells(statsContext) {
     D7: '',
     D8: '',
     D9: '',
-    D10: '',
+    D10: d10,
     D11: d11,
     D12: d12,
     D14: d14,

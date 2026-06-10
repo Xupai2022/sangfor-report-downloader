@@ -28,6 +28,7 @@ const CONFIG = {
   // Cookie 文件路径 (由浏览器插件生成)
   cookiePath: process.env.SANGFOR_COOKIE_PATH || path.join(DEFAULT_COOKIE_DOWNLOAD_DIR, 'cookies.txt'),
   xdrCookiePath: process.env.SANGFOR_XDR_COOKIE_PATH || path.join(DEFAULT_COOKIE_DOWNLOAD_DIR, 'xdr_cookies.txt'),
+  xdrBaseUrl: process.env.SANGFOR_XDR_BASE_URL || '',
 
   // 报告模板路径
   reportTemplatePath: process.env.SANGFOR_REPORT_TEMPLATE_PATH || DEFAULT_REPORT_TEMPLATE_PATH,
@@ -133,6 +134,7 @@ function parseArgs() {
     responseOnly: false,
     cookiePath: CONFIG.cookiePath,
     xdrCookiePath: CONFIG.xdrCookiePath,
+    xdrBaseUrl: CONFIG.xdrBaseUrl,
     outputDir: CONFIG.outputDir,
     reportTemplatePath: CONFIG.reportTemplatePath,
     manageSubTypeMapFile: process.env.SANGFOR_MANAGE_SUB_TYPE_MAP_FILE || path.join(__dirname, 'data', 'manage_sub_type_map.json'),
@@ -173,6 +175,9 @@ function parseArgs() {
         break;
       case '--xdr-cookie-path':
         options.xdrCookiePath = args[++i] || CONFIG.xdrCookiePath;
+        break;
+      case '--xdr-base-url':
+        options.xdrBaseUrl = args[++i] || CONFIG.xdrBaseUrl;
         break;
       case '--output-dir':
         options.outputDir = args[++i] || CONFIG.outputDir;
@@ -232,6 +237,7 @@ function showHelp() {
   --customer-id <ID>       客户ID (可选)
   --cookie-path <路径>     Cookie 文件路径 (默认: M:\\Users\\%USERNAME%\\Downloads\\cookies.txt，也可用 SANGFOR_COOKIE_PATH)
   --xdr-cookie-path <路径> XDR Cookie 文件路径 (默认: M:\\Users\\%USERNAME%\\Downloads\\xdr_cookies.txt，也可用 SANGFOR_XDR_COOKIE_PATH)
+  --xdr-base-url <域名>    XDR 域名覆盖，例如 xdrsz.sangfor.com.cn（也可用 SANGFOR_XDR_BASE_URL）
   --output-dir <路径>      输出目录 (默认: 脚本所在目录)
   --page-size <大小>       每页数量 (默认: 100，资产漏洞表默认: 50)
   --page-delay-ms <毫秒>   每页请求后的等待时间 (默认: 10)
@@ -663,6 +669,9 @@ async function downloadReports(options) {
       console.log(`[XDR] 月度 in2out/out2in 查询时间段: ${reportMonthRanges.length} 段`);
       console.log(`[XDR] 重保原子查询时间段: ${protectionRanges.length} 段`);
       const xdrCookieInfo = cookieReader.getCookieInfo(options.xdrCookiePath || CONFIG.xdrCookiePath);
+      if (options.xdrBaseUrl) {
+        xdrCookieInfo.xdrBaseUrl = options.xdrBaseUrl;
+      }
       results.xdrIn2outLogSearchCount = await requestWithRetry(
         () => apiClient.fetchXdrIn2outLogSearchCount(xdrCookieInfo, reportRange),
         requestParams

@@ -46,6 +46,20 @@ function cookiePairsToString(pairs) {
     .join('; ');
 }
 
+function normalizeBaseUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  const withScheme = raw.includes('://') ? raw : `https://${raw}`;
+  try {
+    return new URL(withScheme).hostname;
+  } catch (error) {
+    return raw.replace(/^https?:\/\//i, '').replace(/\/.*$/, '');
+  }
+}
+
 function normalizeCookieContent(rawContent) {
   const content = rawContent.trim();
   if (!content) {
@@ -58,22 +72,26 @@ function normalizeCookieContent(rawContent) {
     if (Array.isArray(parsed)) {
       return {
         cookieString: cookiePairsToString(parsed),
-        csrfToken: null
+        csrfToken: null,
+        xdrBaseUrl: ''
       };
     }
 
     const cookieString = parsed.cookie || parsed.cookieString || parsed.Cookie || parsed.cookiesText;
+    const xdrBaseUrl = normalizeBaseUrl(parsed.xdrBaseUrl || parsed.baseUrl || parsed.domain);
     if (typeof cookieString === 'string' && cookieString.trim()) {
       return {
         cookieString: cookieString.trim(),
-        csrfToken: parsed.csrfToken || parsed.xCsrftoken || parsed['x-csrftoken'] || null
+        csrfToken: parsed.csrfToken || parsed.xCsrftoken || parsed['x-csrftoken'] || null,
+        xdrBaseUrl
       };
     }
 
     if (Array.isArray(parsed.cookies)) {
       return {
         cookieString: cookiePairsToString(parsed.cookies),
-        csrfToken: parsed.csrfToken || parsed.xCsrftoken || parsed['x-csrftoken'] || null
+        csrfToken: parsed.csrfToken || parsed.xCsrftoken || parsed['x-csrftoken'] || null,
+        xdrBaseUrl
       };
     }
 
@@ -82,7 +100,8 @@ function normalizeCookieContent(rawContent) {
 
   return {
     cookieString: content,
-    csrfToken: null
+    csrfToken: null,
+    xdrBaseUrl: ''
   };
 }
 
@@ -194,6 +213,7 @@ function getCookieInfo(cookiePath = DEFAULT_COOKIE_PATH) {
   return {
     cookieString,
     csrfToken,
+    xdrBaseUrl: normalized.xdrBaseUrl || '',
     cookies,
     validation
   };
@@ -202,6 +222,7 @@ function getCookieInfo(cookiePath = DEFAULT_COOKIE_PATH) {
 module.exports = {
   resolveCookiePath,
   normalizeCookieContent,
+  normalizeBaseUrl,
   readCookieString,
   parseCookieString,
   extractCsrfToken,
