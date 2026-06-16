@@ -115,6 +115,26 @@ function validateReportType(type) {
   }
 }
 
+function normalizeBusinessSystems(value) {
+  if (value === undefined || value === null || value === '') return [];
+
+  const rawItems = Array.isArray(value) ? value : [value];
+  const normalized = [];
+  for (const rawItem of rawItems) {
+    String(rawItem || '')
+      .split(/[，、,；;\r\n]+/)
+      .map(item => item.replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .forEach(item => normalized.push(item));
+  }
+
+  if (normalized.length > 3) {
+    throw new Error('最多支持 3 个业务系统。请精简后重试。');
+  }
+
+  return normalized;
+}
+
 /**
  * 解析命令行参数
  */
@@ -138,7 +158,8 @@ function parseArgs() {
     outputDir: CONFIG.outputDir,
     reportTemplatePath: CONFIG.reportTemplatePath,
     manageSubTypeMapFile: process.env.SANGFOR_MANAGE_SUB_TYPE_MAP_FILE || path.join(__dirname, 'data', 'manage_sub_type_map.json'),
-    assetMapFile: process.env.SANGFOR_ASSET_MAP_FILE || path.join(__dirname, 'data', 'asset.xlsx')
+    assetMapFile: process.env.SANGFOR_ASSET_MAP_FILE || path.join(__dirname, 'data', 'asset.xlsx'),
+    businessSystems: []
   };
   
   for (let i = 0; i < args.length; i++) {
@@ -201,6 +222,9 @@ function parseArgs() {
       case '--asset-map-file':
         options.assetMapFile = args[++i] || '';
         break;
+      case '--business-systems':
+        options.businessSystems = args[++i] || '';
+        break;
       case '--response-only':
       case '--debug-response':
         options.responseOnly = true;
@@ -213,6 +237,7 @@ function parseArgs() {
   }
   
   options.type = normalizeReportType(options.type);
+  options.businessSystems = normalizeBusinessSystems(options.businessSystems);
   return options;
 }
 
@@ -243,6 +268,7 @@ function showHelp() {
   --page-delay-ms <毫秒>   每页请求后的等待时间 (默认: 10)
   --manage-sub-type-map-file <路径> manage_sub_type 映射文件（默认 ./data/manage_sub_type_map.json）
   --asset-map-file <路径>  资产IP与安全域映射文件（默认 ./data/asset.xlsx，支持 xlsx/json）
+  --business-systems <名称> 业务系统列表，逗号分隔，最多 3 个
   --response-only          只请求第一页并保存原始 response JSON，不生成 Excel
   --help, -h               显示帮助信息
 
@@ -449,10 +475,14 @@ async function downloadReports(options) {
     validateDate(options.endDate);
     options.type = normalizeReportType(options.type);
     validateReportType(options.type);
+    options.businessSystems = normalizeBusinessSystems(options.businessSystems);
     console.log(`[参数] 客户: ${options.customer || '未指定'}`);
     console.log(`[参数] 客户ID(输入): ${options.customerId || '未指定'}`);
     console.log(`[参数] 时间: ${options.startDate} ~ ${options.endDate}`);
     console.log(`[参数] 类型: ${options.type}`);
+    if (options.businessSystems.length > 0) {
+      console.log(`[参数] 业务系统: ${options.businessSystems.join(', ')}`);
+    }
 
     let resolvedCustomerId = options.customerId || '';
     if (!resolvedCustomerId) {
@@ -769,6 +799,7 @@ async function downloadReports(options) {
       eventStats: transformedEventResult ? transformedEventResult.stats : null,
       alarmData: transformedAlarmData,
       vulnData: transformedVulnData,
+      businessSystems: options.businessSystems,
       vulnRawRowCount: Array.isArray(results.vulnData) ? results.vulnData.length : null,
       xdrLogSearchCount: results.xdrLogSearchCount,
       xdrHolidayLogSearchCounts: results.xdrHolidayLogSearchCounts,
@@ -876,5 +907,6 @@ if (require.main === module) {
 module.exports = {
   downloadReports,
   CONFIG,
-  parseArgs
+  parseArgs,
+  normalizeBusinessSystems
 };

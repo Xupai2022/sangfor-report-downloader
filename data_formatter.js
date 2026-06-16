@@ -973,6 +973,109 @@ function countAssetRowsByCriteria(assetWorksheet, criteria) {
   }).length;
 }
 
+function normalizeBusinessSystems(value) {
+  if (value === undefined || value === null || value === '') return [];
+
+  const rawItems = Array.isArray(value) ? value : [value];
+  const normalized = [];
+  for (const rawItem of rawItems) {
+    String(rawItem || '')
+      .split(/[，、,；;\r\n]+/)
+      .map(item => toText(item))
+      .filter(Boolean)
+      .forEach(item => normalized.push(item));
+  }
+
+  if (normalized.length > 3) {
+    throw new Error('最多支持 3 个业务系统。请精简后重试。');
+  }
+
+  return normalized;
+}
+
+function extractIPv4Texts(value) {
+  const ips = new Set();
+  const visit = (item) => {
+    if (item === null || item === undefined) return;
+    if (Array.isArray(item)) {
+      item.forEach(visit);
+      return;
+    }
+    if (typeof item === 'object') {
+      Object.values(item).forEach(visit);
+      return;
+    }
+
+    const matches = String(item).match(/\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b/g);
+    if (matches) {
+      matches.forEach(ip => ips.add(ip));
+    }
+  };
+
+  visit(value);
+  return Array.from(ips);
+}
+
+function collectBusinessSystemIpSets(assetWorksheet, businessSystems) {
+  const systems = normalizeBusinessSystems(businessSystems);
+  const result = systems.map(name => ({ name, ips: new Set() }));
+  if (result.length === 0 || !assetWorksheet) return result;
+
+  const rows = getWorksheetRows(assetWorksheet);
+  rows.slice(2).forEach((row) => {
+    const businessSystemText = toText(row && row[1]);
+    if (!businessSystemText) return;
+    const rowIps = extractIPv4Texts(row && row[2]);
+    if (rowIps.length === 0) return;
+
+    result.forEach((item) => {
+      if (!businessSystemText.includes(item.name)) return;
+      rowIps.forEach(ip => item.ips.add(ip));
+    });
+  });
+
+  return result;
+}
+
+function rowContainsAnyIp(row, fieldNames, ipSet) {
+  if (!row || !ipSet || ipSet.size === 0) return false;
+  for (const fieldName of fieldNames) {
+    const ips = extractIPv4Texts(row[fieldName]);
+    if (ips.some(ip => ipSet.has(ip))) return true;
+  }
+  return false;
+}
+
+function countRowsContainingIps(rows, fieldNames, ipSet) {
+  if (!Array.isArray(rows) || !ipSet || ipSet.size === 0) return 0;
+  return rows.filter(row => rowContainsAnyIp(row, fieldNames, ipSet)).length;
+}
+
+function buildBusinessSystemStatistics(statsContext) {
+  const systems = collectBusinessSystemIpSets(
+    statsContext && statsContext.assetWorksheet,
+    statsContext && statsContext.businessSystems
+  );
+  const eventRows = statsContext && Array.isArray(statsContext.eventRows) ? statsContext.eventRows : [];
+  const alarmRows = statsContext && Array.isArray(statsContext.alarmRows) ? statsContext.alarmRows : [];
+  const vulnRows = statsContext && Array.isArray(statsContext.vulnRows) ? statsContext.vulnRows : [];
+
+  return systems.map((system) => {
+    const vulnCount = countRowsContainingIps(vulnRows, ['IP', '受影响主机/位置'], system.ips);
+    const eventCount = countRowsContainingIps(eventRows, ['host_ip', 'affected_assets'], system.ips);
+    const alarmCount = countRowsContainingIps(alarmRows, ['host_ip'], system.ips);
+
+    return {
+      name: system.name,
+      ips: Array.from(system.ips),
+      total: vulnCount + eventCount + alarmCount,
+      vulnCount,
+      eventCount,
+      alarmCount
+    };
+  });
+}
+
 function setWorksheetCellValue(ws, address, value) {
   const cell = getWorksheetCell(ws, address);
   ensureWorksheetRefIncludesCell(ws, address);
@@ -1020,6 +1123,7 @@ function buildStatisticsCells(statsContext) {
     eventStats = {},
     alarmRows = [],
     vulnRows = [],
+    businessSystems = [],
     assetWorksheet = null,
     exposedSurfaceWorksheet = null,
     exposedSurfacePortCount = '',
@@ -1246,6 +1350,19 @@ function buildStatisticsCells(statsContext) {
   const e80 = e80WeakPwdTotal + e80AccountSecurityEventCount;
   const d10 = e80;
   const g11 = d6 + d10 + d12;
+  const businessSystemStats = buildBusinessSystemStatistics({
+    businessSystems,
+    assetWorksheet,
+    eventRows,
+    alarmRows,
+    vulnRows
+  });
+  const businessSystemCells = {};
+  for (let index = 0; index < 3; index += 1) {
+    const item = businessSystemStats[index];
+    businessSystemCells[`D${3 + index}`] = item ? item.name : '';
+    businessSystemCells[`D${7 + index}`] = item ? item.total : '';
+  }
   const topEventManageSubTypeStats = buildTopEventManageSubTypeStats(eventRows, 5);
   const topEventManageSubTypeCells = {};
   for (let index = 0; index < 5; index += 1) {
@@ -1358,13 +1475,8 @@ function buildStatisticsCells(statsContext) {
     M1: formatReportDate(endDate),
     M3: protectStartDate && protectEndDate ? formatReportDateRange(protectStartDate, protectEndDate) : '',
     ...holidayCells,
-    D3: '',
-    D4: '',
-    D5: '',
+    ...businessSystemCells,
     D6: d6,
-    D7: '',
-    D8: '',
-    D9: '',
     D10: d10,
     D11: d11,
     D12: d12,
@@ -1449,7 +1561,7 @@ function buildStatisticsCells(statsContext) {
     G11: g11,
     G12: g12
   };
-  cells.__blankCells = blankTrendCells.concat(holidaySummaryBlankCells);
+  cells.__blankCells = blankTrendCells.concat(holidaySummaryBlankCells, ['D3', 'D4', 'D5', 'D7', 'D8', 'D9']);
   return cells;
 }
 
@@ -1498,6 +1610,7 @@ function generateReport(options) {
     eventStats,
     alarmData,
     vulnData,
+    businessSystems,
     vulnRawRowCount,
     xdrIn2outLogSearchCount,
     xdrOut2inLogSearchCount,
@@ -1555,6 +1668,7 @@ function generateReport(options) {
       eventStats: eventStats || {},
       alarmRows: alarmData || [],
       vulnRows: vulnData || [],
+      businessSystems,
       assetWorksheet,
       exposedSurfaceWorksheet,
       exposedSurfacePortCount,
@@ -1644,6 +1758,9 @@ module.exports = {
   buildReportMonthSecondRanges,
   buildProtectionSecondRanges,
   buildProtectionAtomicSecondRanges,
+  normalizeBusinessSystems,
+  collectBusinessSystemIpSets,
+  buildBusinessSystemStatistics,
   buildStatisticsCells,
   populateStatisticsSheet,
   generateReport,

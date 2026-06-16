@@ -2,6 +2,7 @@ const assert = require('assert');
 const XLSX = require('xlsx');
 const dataFormatter = require('../data_formatter');
 const apiClient = require('../api_client');
+const soarTransformer = require('../soar_transformer');
 
 function ownerLabels(range) {
   return (range.owners || []).map(owner => `${owner.source}:${owner.name}`).sort();
@@ -320,6 +321,19 @@ function testStatisticsCellsG11UsesD6D10D12() {
   assert.strictEqual(cells.G11, 11);
 }
 
+function testWeakPwdSummaryRequestMatchesCapturedTimeRange() {
+  const body = apiClient.buildWeakPwdSummaryRequestBody({
+    startTime: '2026-01-01',
+    endTime: '2026-04-29',
+    customerId: '26912728'
+  });
+
+  assert.deepStrictEqual(body.found_time, [1767196800000, 1777478400000]);
+  assert.strictEqual(body.is_admin, 1);
+  assert.deepStrictEqual(body.service_status, [0]);
+  assert.strictEqual(body.company_id, '26912728');
+}
+
 function testPopulateStatisticsSheetWritesAndClearsHolidayAverages() {
   const wb = XLSX.utils.book_new();
   const ws = XLSX.utils.aoa_to_sheet([]);
@@ -350,6 +364,139 @@ function testPopulateStatisticsSheetWritesAndClearsHolidayAverages() {
   assert.strictEqual(ws.H92.v, '');
 }
 
+function testBusinessSystemStatisticsByAssetIps() {
+  const assetWorksheet = XLSX.utils.aoa_to_sheet([
+    ['', '', ''],
+    ['序号', '业务系统', 'IP'],
+    [1, '核心系统A', '10.0.0.1'],
+    [2, '系统B', '10.0.0.2, 10.0.0.3'],
+    [3, '核心系统A和系统C', '10.0.0.4'],
+    [4, '其他系统', '10.0.0.5']
+  ]);
+
+  const cells = dataFormatter.buildStatisticsCells({
+    startDate: '2026-03-01',
+    endDate: '2026-03-31',
+    businessSystems: ['核心系统A', '系统B', '系统C'],
+    assetWorksheet,
+    vulnRows: [
+      { IP: '10.0.0.1', '受影响主机/位置': '' },
+      { IP: '', '受影响主机/位置': 'http://10.0.0.2/path' },
+      { IP: '10.0.0.4', '受影响主机/位置': '10.0.0.3' }
+    ],
+    eventRows: [
+      { create_time: '2026-03-10', host_ip: '10.0.0.4', affected_assets: ['10.0.0.9'] },
+      { create_time: '2026-03-11', host_ip: '', affected_assets: ['10.0.0.3', '10.0.0.2'] }
+    ],
+    alarmRows: [
+      { create_time: '2026-03-12', host_ip: '10.0.0.1' },
+      { create_time: '2026-03-13', host_ip: '10.0.0.3' }
+    ]
+  });
+
+  assert.strictEqual(cells.D3, '核心系统A');
+  assert.strictEqual(cells.D4, '系统B');
+  assert.strictEqual(cells.D5, '系统C');
+  assert.strictEqual(cells.D7, 4);
+  assert.strictEqual(cells.D8, 4);
+  assert.strictEqual(cells.D9, 2);
+}
+
+function testBusinessSystemStatisticsStartsAtB3C3() {
+  const assetWorksheet = XLSX.utils.aoa_to_sheet([
+    ['', '核心系统A', '10.0.0.99'],
+    ['', '核心系统A', '10.0.0.98'],
+    [1, '核心系统A', '10.0.0.1']
+  ]);
+
+  const stats = dataFormatter.buildBusinessSystemStatistics({
+    businessSystems: ['核心系统A'],
+    assetWorksheet,
+    vulnRows: [{ IP: '10.0.0.1' }, { IP: '10.0.0.99' }],
+    eventRows: [],
+    alarmRows: []
+  });
+
+  assert.deepStrictEqual(stats[0].ips, ['10.0.0.1']);
+  assert.strictEqual(stats[0].total, 1);
+}
+
+function testBusinessSystemStatisticsRejectsMoreThanThree() {
+  assert.throws(
+    () => dataFormatter.normalizeBusinessSystems(['a', 'b', 'c', 'd']),
+    /最多支持 3 个业务系统/
+  );
+}
+
+function testPopulateStatisticsSheetWritesAndClearsBusinessSystemCells() {
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([]);
+  ['D3', 'D4', 'D5', 'D7', 'D8', 'D9'].forEach((address) => {
+    ws[address] = { t: 's', v: '旧值' };
+  });
+  ws['!ref'] = 'A1:D9';
+  XLSX.utils.book_append_sheet(wb, ws, '数据统计');
+  const assetWorksheet = XLSX.utils.aoa_to_sheet([
+    ['', '', ''],
+    ['序号', '业务系统', 'IP'],
+    [1, '核心系统A', '10.0.0.1']
+  ]);
+
+  dataFormatter.populateStatisticsSheet(wb, {
+    startDate: '2026-03-01',
+    endDate: '2026-03-31',
+    businessSystems: ['核心系统A'],
+    assetWorksheet,
+    vulnRows: [],
+    eventRows: [],
+    alarmRows: []
+  });
+
+  assert.strictEqual(ws.D3.v, '核心系统A');
+  assert.strictEqual(ws.D7.v, 0);
+  assert.strictEqual(ws.D4.v, '');
+  assert.strictEqual(ws.D5.v, '');
+  assert.strictEqual(ws.D8.v, '');
+  assert.strictEqual(ws.D9.v, '');
+}
+
+function testStrategyOptimizeDeviceOfflineAlwaysMapsToBusinessContinuityRisk() {
+  const result = soarTransformer.transformEventDocsWithStats([
+    {
+      event_grading_tag: 0,
+      manage_type: 'STRATEGY_OPTIMIZE',
+      manage_type_cn: '策略调优',
+      manage_sub_type: 'DEVICE_OFFLINE',
+      manage_sub_type_cn: '设备离线',
+      event_name: '设备离线',
+      create_time: '2026-06-01 10:00:00',
+      event_status: 'finished',
+      push_status: 1
+    }
+  ]);
+
+  assert.strictEqual(result.rows.length, 1);
+  assert.strictEqual(result.rows[0].event_grading_tag, '业务连续性风险');
+}
+
+function testStrategyOptimizeLogCheckExceptionAlwaysIgnored() {
+  const result = soarTransformer.transformEventDocsWithStats([
+    {
+      event_grading_tag: 2,
+      manage_type: 'STRATEGY_OPTIMIZE',
+      manage_type_cn: '策略调优',
+      manage_sub_type: 'LOG_CHECK_EXCEPTION',
+      manage_sub_type_cn: '日志检测异常',
+      event_name: '日志检测异常',
+      create_time: '2026-06-01 10:00:00',
+      event_status: 'finished',
+      push_status: 1
+    }
+  ]);
+
+  assert.strictEqual(result.rows.length, 0);
+}
+
 const tests = [
   testInclusiveDayCounts,
   testHolidayClipping,
@@ -369,7 +516,14 @@ const tests = [
   testStatisticsCellsMissingHolidayCountLeavesAverageBlank,
   testStatisticsCellsManualOnlyLeavesHolidayAverageBlank,
   testStatisticsCellsG11UsesD6D10D12,
-  testPopulateStatisticsSheetWritesAndClearsHolidayAverages
+  testWeakPwdSummaryRequestMatchesCapturedTimeRange,
+  testPopulateStatisticsSheetWritesAndClearsHolidayAverages,
+  testBusinessSystemStatisticsByAssetIps,
+  testBusinessSystemStatisticsStartsAtB3C3,
+  testBusinessSystemStatisticsRejectsMoreThanThree,
+  testPopulateStatisticsSheetWritesAndClearsBusinessSystemCells,
+  testStrategyOptimizeDeviceOfflineAlwaysMapsToBusinessContinuityRisk,
+  testStrategyOptimizeLogCheckExceptionAlwaysIgnored
 ];
 
 tests.forEach((test) => {

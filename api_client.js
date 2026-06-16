@@ -578,7 +578,7 @@ function buildVulnRequestBody(params) {
 function buildWeakPwdSummaryRequestBody(params) {
   const startTimestamp = dateToTimestamp(params.startTime);
   const endTimestamp = dateToTimestamp(params.endTime);
-  const endOfDay = endTimestamp + 24 * 60 * 60 * 1000 - 1;
+  const endOfDay = endTimestamp + 24 * 60 * 60 * 1000;
 
   return {
     order: 'asc',

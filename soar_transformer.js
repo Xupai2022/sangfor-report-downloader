@@ -426,6 +426,28 @@ function isUndeclaredThreatManageType(eventDoc) {
   return manageType === 'UNDECLARED_THREAT' || manageTypeDisplay.includes('未公开威胁');
 }
 
+function isStrategyOptimizeDeviceOffline(eventDoc) {
+  const manageType = stringifyEnumKey(eventDoc.manage_type);
+  const manageSubType = stringifyEnumKey(eventDoc.manage_sub_type);
+  const manageTypeDisplay = resolveManageTypeDisplay(eventDoc);
+  const manageSubTypeDisplay = decodeUnicodeEscapes(eventDoc.manage_sub_type_cn);
+  return (
+    (manageType === 'STRATEGY_OPTIMIZE' || manageTypeDisplay.includes('策略调优'))
+    && (manageSubType === 'DEVICE_OFFLINE' || manageSubTypeDisplay.includes('设备离线'))
+  );
+}
+
+function isStrategyOptimizeLogCheckException(eventDoc) {
+  const manageType = stringifyEnumKey(eventDoc.manage_type);
+  const manageSubType = stringifyEnumKey(eventDoc.manage_sub_type);
+  const manageTypeDisplay = resolveManageTypeDisplay(eventDoc);
+  const manageSubTypeDisplay = decodeUnicodeEscapes(eventDoc.manage_sub_type_cn);
+  return (
+    (manageType === 'STRATEGY_OPTIMIZE' || manageTypeDisplay.includes('策略调优'))
+    && (manageSubType === 'LOG_CHECK_EXCEPTION' || manageSubTypeDisplay.includes('日志检测异常'))
+  );
+}
+
 function parseDateTime(value) {
   if (value instanceof Date) return value;
   if (typeof value === 'number') {
@@ -606,6 +628,18 @@ function resolveEventGradingTag5Rule(eventDoc) {
     return { ignore: false, eventGradingTag: LATEST_THREAT_TYPE, strategyOptimizeCount: 0 };
   }
 
+  if (isStrategyOptimizeDeviceOffline(eventDoc)) {
+    return {
+      ignore: false,
+      eventGradingTag: '业务连续性风险',
+      strategyOptimizeCount: 0
+    };
+  }
+
+  if (isStrategyOptimizeLogCheckException(eventDoc)) {
+    return { ignore: true, strategyOptimizeCount: 0 };
+  }
+
   if (stringifyEnumKey(eventDoc.event_grading_tag) !== '5') {
     return { ignore: false, strategyOptimizeCount: 0 };
   }
@@ -618,16 +652,6 @@ function resolveEventGradingTag5Rule(eventDoc) {
   }
 
   if (manageType === 'STRATEGY_OPTIMIZE') {
-    if (manageSubType === 'LOG_CHECK_EXCEPTION') {
-      return { ignore: true, strategyOptimizeCount: 0 };
-    }
-    if (manageSubType === 'DEVICE_OFFLINE') {
-      return {
-        ignore: false,
-        eventGradingTag: '业务连续性风险',
-        strategyOptimizeCount: 0
-      };
-    }
     if (STRATEGY_OPTIMIZE_MANAGE_SUB_TYPES.has(manageSubType)) {
       return { ignore: false, strategyOptimizeCount: 1 };
     }
