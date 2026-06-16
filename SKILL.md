@@ -15,6 +15,7 @@ description: 下载 SOAR 原始数据并生成指定客户、指定时间段的�
 - “先把原始 response 导出来看看”
 
 不要用本技能做端到端 AI PPT 生成。
+PPT 模板选择不在本技能处理；用户要求协同运营报告/plus 或托管运营报告/simple 时，切换到 `ai-ppt-pipeline` 并传对应 `--template`。
 
 ## 前置条件
 
@@ -79,6 +80,7 @@ $HOME\.openclaw\workspace\skills\sangfor-report-downloader
 ## 重要说明
 
 - 生成的工作簿可以作为后续 PPT 生成的 Excel 输入，但本技能本身只到 Excel 为止。
+- PPT 模板由后续 `ai-ppt-pipeline` 选择：默认协同运营报告 `mss_classic_ops_2`；用户明确指定托管运营报告/simple 时使用 `mss_classic_ops_3`。
 - 后续如有数据从 XDR 获取，使用 `--xdr-cookie-path` 指向 `xdr_cookies.txt`，不要复用 MSS 的 `cookies.txt`。
 - 如果用户要的是 AI PPT，或者要对 PPT 进行重写，不要停留在本技能，应切换到 `ai-ppt-pipeline` 或 `ai-report-generator`。
 - 如果用户明确只要某一个表，保留其显式指定的报告类型，不要默认扩成全部数据。
