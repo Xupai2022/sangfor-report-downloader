@@ -526,12 +526,16 @@ async function downloadReports(options) {
       vulnData: null,
       exposedSurfacePortCount: null,
       weakPwdSummaryTotal: null,
+      weakPwdSummaryList: [],
+      weakPwdHandledTotal: null,
+      weakPwdHandledList: [],
       topnReportStats: null,
       xdrLogSearchCount: null,
       xdrHolidayLogSearchCounts: {},
       xdrProtectionQueriedRanges: [],
       xdrIn2outLogSearchCount: null,
       xdrOut2inLogSearchCount: null,
+      xdrRejectedExternalToInternalCount: null,
       xdrMonthlyIn2outLogSearchCounts: [],
       xdrMonthlyOut2inLogSearchCounts: [],
       assetError: null,
@@ -647,14 +651,33 @@ async function downloadReports(options) {
 
     console.log('\n--- 查询弱口令统计 ---');
     try {
-      results.weakPwdSummaryTotal = await requestWithRetry(
-        (params) => apiClient.fetchWeakPwdSummaryTotal(cookieInfo, params),
+      const weakPwdSummary = await requestWithRetry(
+        (params) => apiClient.fetchWeakPwdSummary(cookieInfo, params),
         requestParams
       );
+      results.weakPwdSummaryTotal = weakPwdSummary.total;
+      results.weakPwdSummaryList = weakPwdSummary.list;
       console.log(`[成功] 弱口令统计: ${results.weakPwdSummaryTotal}`);
     } catch (error) {
       results.weakPwdError = error.message;
       throw new Error(`弱口令统计失败: ${error.message}`);
+    }
+
+    console.log('\n--- 查询已处理弱口令统计 ---');
+    try {
+      const handledWeakPwdSummary = await requestWithRetry(
+        (params) => apiClient.fetchWeakPwdSummary(cookieInfo, {
+          ...params,
+          dealStatus: [2]
+        }),
+        requestParams
+      );
+      results.weakPwdHandledTotal = handledWeakPwdSummary.total;
+      results.weakPwdHandledList = handledWeakPwdSummary.list;
+      console.log(`[成功] 已处理弱口令统计: ${results.weakPwdHandledTotal}`);
+    } catch (error) {
+      results.weakPwdError = error.message;
+      throw new Error(`已处理弱口令统计失败: ${error.message}`);
     }
 
     console.log('\n--- 查询 SOAR TopN 统计 ---');
@@ -710,6 +733,10 @@ async function downloadReports(options) {
         () => apiClient.fetchXdrOut2inLogSearchCount(xdrCookieInfo, reportRange),
         requestParams
       );
+      results.xdrRejectedExternalToInternalCount = await requestWithRetry(
+        () => apiClient.fetchXdrRejectedExternalToInternalCount(xdrCookieInfo, reportRange),
+        requestParams
+      );
       results.xdrMonthlyIn2outLogSearchCounts = [];
       results.xdrMonthlyOut2inLogSearchCounts = [];
       for (let index = 0; index < reportMonthRanges.length; index += 1) {
@@ -753,6 +780,7 @@ async function downloadReports(options) {
       }
       console.log(`[成功] XDR in2out 日志统计: ${results.xdrIn2outLogSearchCount}`);
       console.log(`[成功] XDR out2in 日志统计: ${results.xdrOut2inLogSearchCount}`);
+      console.log(`[成功] XDR 外到内拒绝日志统计: ${results.xdrRejectedExternalToInternalCount}`);
       console.log(`[成功] XDR 月度 in2out 日志统计: ${results.xdrMonthlyIn2outLogSearchCounts.map(item => `${item.monthLabel}:${item.count}`).join(', ')}`);
       console.log(`[成功] XDR 月度 out2in 日志统计: ${results.xdrMonthlyOut2inLogSearchCounts.map(item => `${item.monthLabel}:${item.count}`).join(', ')}`);
       console.log(`[成功] XDR 重保日志统计: ${results.xdrLogSearchCount}`);
@@ -793,6 +821,9 @@ async function downloadReports(options) {
       exposedSurfaceWorkbookBuffer: results.exposedSurfaceWorkbookBuffer,
       exposedSurfacePortCount: results.exposedSurfacePortCount,
       weakPwdSummaryTotal: results.weakPwdSummaryTotal,
+      weakPwdSummaryList: results.weakPwdSummaryList,
+      weakPwdHandledTotal: results.weakPwdHandledTotal,
+      weakPwdHandledList: results.weakPwdHandledList,
       topnReportStats: results.topnReportStats,
       reportTemplatePath: options.reportTemplatePath,
       eventData: transformedEventData,
@@ -805,6 +836,7 @@ async function downloadReports(options) {
       xdrHolidayLogSearchCounts: results.xdrHolidayLogSearchCounts,
       xdrIn2outLogSearchCount: results.xdrIn2outLogSearchCount,
       xdrOut2inLogSearchCount: results.xdrOut2inLogSearchCount,
+      xdrRejectedExternalToInternalCount: results.xdrRejectedExternalToInternalCount,
       xdrMonthlyIn2outLogSearchCounts: results.xdrMonthlyIn2outLogSearchCounts,
       xdrMonthlyOut2inLogSearchCounts: results.xdrMonthlyOut2inLogSearchCounts,
       outputDir: options.outputDir || CONFIG.outputDir,

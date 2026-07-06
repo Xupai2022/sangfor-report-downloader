@@ -786,6 +786,44 @@ function getEventManageSubTypeName(row) {
   );
 }
 
+function countEventRowsByManageSubTypeKeywords(eventRows, keywords) {
+  if (!Array.isArray(eventRows) || !Array.isArray(keywords) || keywords.length === 0) return 0;
+  const normalizedKeywords = keywords.map(keyword => toText(keyword)).filter(Boolean);
+  if (normalizedKeywords.length === 0) return 0;
+
+  return eventRows.filter((row) => {
+    const name = getEventManageSubTypeName(row);
+    return name && normalizedKeywords.some(keyword => name.includes(keyword));
+  }).length;
+}
+
+function countEventRowsByManageSubTypeKeywordsAndIps(eventRows, keywords, ipSet) {
+  if (!Array.isArray(eventRows) || !ipSet || ipSet.size === 0) return 0;
+  const normalizedKeywords = Array.isArray(keywords)
+    ? keywords.map(keyword => toText(keyword)).filter(Boolean)
+    : [];
+  if (normalizedKeywords.length === 0) return 0;
+
+  return eventRows.filter((row) => {
+    const name = getEventManageSubTypeName(row);
+    if (!name || !normalizedKeywords.some(keyword => name.includes(keyword))) return false;
+    return rowContainsAnyIp(row, ['host_ip', 'affected_assets'], ipSet);
+  }).length;
+}
+
+function countMatchedAffectedAssetIps(value, ipSet) {
+  if (!ipSet || ipSet.size === 0) return 0;
+  return extractIPv4Texts(value).filter(ip => ipSet.has(ip)).length;
+}
+
+function countWeakPwdRowsContainingIps(weakPwdSummaryList, ipSet) {
+  if (!Array.isArray(weakPwdSummaryList) || !ipSet || ipSet.size === 0) return 0;
+  return weakPwdSummaryList.filter((row) => {
+    const ips = extractIPv4Texts(row && row.ip);
+    return ips.some(ip => ipSet.has(ip));
+  }).length;
+}
+
 function buildTopEventManageSubTypeStats(eventRows, limit = 5) {
   const counts = new Map();
   (Array.isArray(eventRows) ? eventRows : []).forEach((row) => {
@@ -973,6 +1011,24 @@ function countAssetRowsByCriteria(assetWorksheet, criteria) {
   }).length;
 }
 
+function countDistinctBusinessSystems(assetWorksheet) {
+  const rows = getWorksheetRows(assetWorksheet);
+  if (rows.length === 0) return 0;
+
+  const { rowIndex, indexes } = findHeaderRowAndIndexes(rows, ['业务系统']);
+  const startRow = rowIndex >= 0 ? rowIndex + 1 : 2;
+  const businessSystemIndex = indexes['业务系统'] >= 0 ? indexes['业务系统'] : 1;
+  const names = new Set();
+
+  rows.slice(startRow).forEach((row) => {
+    const value = toText(row && row[businessSystemIndex]);
+    if (!value) return;
+    names.add(value);
+  });
+
+  return names.size;
+}
+
 function normalizeBusinessSystems(value) {
   if (value === undefined || value === null || value === '') return [];
 
@@ -1057,21 +1113,66 @@ function buildBusinessSystemStatistics(statsContext) {
     statsContext && statsContext.businessSystems
   );
   const eventRows = statsContext && Array.isArray(statsContext.eventRows) ? statsContext.eventRows : [];
-  const alarmRows = statsContext && Array.isArray(statsContext.alarmRows) ? statsContext.alarmRows : [];
   const vulnRows = statsContext && Array.isArray(statsContext.vulnRows) ? statsContext.vulnRows : [];
+  const weakPwdSummaryList = statsContext && Array.isArray(statsContext.weakPwdSummaryList)
+    ? statsContext.weakPwdSummaryList
+    : [];
+  const weakPwdHandledList = statsContext && Array.isArray(statsContext.weakPwdHandledList)
+    ? statsContext.weakPwdHandledList
+    : [];
+  const range = statsContext && statsContext.range;
+  const keywordList = ['弱口令', '弱密码', '账号安全'];
 
   return systems.map((system) => {
-    const vulnCount = countRowsContainingIps(vulnRows, ['IP', '受影响主机/位置'], system.ips);
-    const eventCount = countRowsContainingIps(eventRows, ['host_ip', 'affected_assets'], system.ips);
-    const alarmCount = countRowsContainingIps(alarmRows, ['host_ip'], system.ips);
+    const d10Count = vulnRows.filter((row) => (
+      toText(row['漏洞等级']) === '高危'
+      && toText(row['是否可利用']) === '是'
+      && isDateInRange(row['更新时间'], range)
+      && rowContainsAnyIp(row, ['IP', '受影响主机/位置'], system.ips)
+    )).length;
+    const d11WeakPwdCount = countWeakPwdRowsContainingIps(weakPwdSummaryList, system.ips);
+    const d11EventCount = countEventRowsByManageSubTypeKeywordsAndIps(eventRows, keywordList, system.ips);
+    const d12Count = eventRows
+      .filter((row) => (
+        isDateInRange(row.create_time, range)
+        && toText(row.type).includes('未公开威胁')
+      ))
+      .reduce((total, row) => total + countMatchedAffectedAssetIps(row.affected_assets, system.ips), 0);
+    const closedLoopD10Count = vulnRows.filter((row) => (
+      toText(row['漏洞等级']) === '高危'
+      && toText(row['是否可利用']) === '是'
+      && toText(row['跟进状态']) === '已闭环'
+      && isDateInRange(row['更新时间'], range)
+      && rowContainsAnyIp(row, ['IP', '受影响主机/位置'], system.ips)
+    )).length;
+    const closedLoopD11WeakPwdCount = countWeakPwdRowsContainingIps(weakPwdHandledList, system.ips);
+    const closedLoopD11EventCount = eventRows.filter((row) => (
+      isDateInRange(row.create_time, range)
+      && toText(row.event_status) === '已闭环'
+      && keywordList.some(keyword => getEventManageSubTypeName(row).includes(keyword))
+      && rowContainsAnyIp(row, ['host_ip', 'affected_assets'], system.ips)
+    )).length;
+    const closedLoopD12Count = eventRows
+      .filter((row) => (
+        isDateInRange(row.create_time, range)
+        && toText(row.event_status) === '已闭环'
+        && toText(row.type).includes('未公开威胁')
+      ))
+      .reduce((total, row) => total + countMatchedAffectedAssetIps(row.affected_assets, system.ips), 0);
 
     return {
       name: system.name,
       ips: Array.from(system.ips),
-      total: vulnCount + eventCount + alarmCount,
-      vulnCount,
-      eventCount,
-      alarmCount
+      total: d10Count + d11WeakPwdCount + d11EventCount + d12Count,
+      closedLoopTotal: closedLoopD10Count + closedLoopD11WeakPwdCount + closedLoopD11EventCount + closedLoopD12Count,
+      d10Count,
+      d11WeakPwdCount,
+      d11EventCount,
+      d12Count,
+      closedLoopD10Count,
+      closedLoopD11WeakPwdCount,
+      closedLoopD11EventCount,
+      closedLoopD12Count
     };
   });
 }
@@ -1128,9 +1229,13 @@ function buildStatisticsCells(statsContext) {
     exposedSurfaceWorksheet = null,
     exposedSurfacePortCount = '',
     weakPwdSummaryTotal = 0,
+    weakPwdSummaryList = [],
+    weakPwdHandledTotal = 0,
+    weakPwdHandledList = [],
     topnReportStats = null,
     xdrIn2outLogSearchCount = '',
     xdrOut2inLogSearchCount = '',
+    xdrRejectedExternalToInternalCount = '',
     xdrMonthlyIn2outLogSearchCounts = [],
     xdrMonthlyOut2inLogSearchCounts = [],
     xdrLogSearchCount = '',
@@ -1159,7 +1264,7 @@ function buildStatisticsCells(statsContext) {
       + 1
   );
 
-  const d6 = vulnRows.filter(row => isDateInRange(row['更新时间'], range)).length;
+  const legacyD6 = vulnRows.filter(row => isDateInRange(row['更新时间'], range)).length;
   const d11 = eventRows.filter((row) => (
     toText(row.event_grading_tag) === '最新威胁'
     && isDateInRange(row.create_time, range)
@@ -1170,11 +1275,32 @@ function buildStatisticsCells(statsContext) {
       && toText(row.type).includes('未公开威胁')
     ))
     .reduce((total, row) => total + countAffectedAssetIps(row.affected_assets), 0);
-  const d16 = vulnRows.filter(row => toText(row['跟进状态']) === '已防护').length;
-  const d17 = vulnRows.filter(row => toText(row['跟进状态']) === '已修复').length;
-  const d18 = alarmRows.filter(row => toText(row.type).includes('漏洞利用攻击')).length;
-  const d15 = d12;
-  const d14 = (toNumericOrNull(d15) || 0) + d16 + d17;
+  const accountSecurityKeywordEventCount = countEventRowsByManageSubTypeKeywords(
+    eventRows,
+    ['弱口令', '弱密码', '账号安全']
+  );
+  const accountSecurityClosedEventCount = eventRows.filter((row) => (
+    isDateInRange(row.create_time, range)
+    && toText(row.event_status) === '已闭环'
+    && ['弱口令', '弱密码', '账号安全'].some(keyword => getEventManageSubTypeName(row).includes(keyword))
+  )).length;
+  const d14 = vulnRows.filter((row) => (
+    toText(row['跟进状态']) === '已防护'
+    && isDateInRange(row['更新时间'], range)
+  )).length;
+  const d15 = vulnRows.filter((row) => (
+    toText(row['跟进状态']) === '已修复'
+    && isDateInRange(row['更新时间'], range)
+  )).length;
+  const d16 = (toNumericOrNull(weakPwdHandledTotal) || 0) + accountSecurityClosedEventCount;
+  const d17 = d12;
+  const d13 = d17 + d14 + d15;
+  const d24 = alarmRows.filter((row) => (
+    toText(row.attack_direction) === '内-外'
+  )).length;
+  const g22 = d14 + d15;
+  const d21 = (toNumericOrNull(xdrRejectedExternalToInternalCount) || 0) + d24;
+  const d20 = d21 + g22;
   const highRiskVulnRows = vulnRows.filter(row => toText(row['漏洞等级']) === '高危');
   const highRiskProtectedCount = highRiskVulnRows.filter(row => toText(row['跟进状态']) === '已防护').length;
   const d34 = highRiskVulnRows.length > 0
@@ -1263,6 +1389,15 @@ function buildStatisticsCells(statsContext) {
     isDateInRange(row.create_time, range)
     && toText(row.type).includes('外部威胁')
   )).length;
+  const g16 = countDistinctBusinessSystems(assetWorksheet);
+  const g17 = countAssetRowsByCriteria(assetWorksheet, {
+    assetType: '服务器',
+    serviceType: '服务内'
+  });
+  const g18 = countAssetRowsByCriteria(assetWorksheet, {
+    assetType: '终端',
+    serviceType: '服务内'
+  });
   const d62 = alarmRows.filter(row => toText(row.type).includes('威胁')).length;
   const d63 = eventRows.filter((row) => (
     isDateInRange(row.create_time, range)
@@ -1281,7 +1416,7 @@ function buildStatisticsCells(statsContext) {
     .filter(row => isThreatEventType(row.event_grading_tag))
     .map(row => toNumericOrNull(row['响应时长']))
     .filter(value => value !== null);
-  const g6 = averageNumbers(g6Numbers);
+  const legacyG6 = averageNumbers(g6Numbers);
 
   const g7 = eventRows.filter((row) => (
     isDateInRange(row.create_time, range)
@@ -1326,7 +1461,7 @@ function buildStatisticsCells(statsContext) {
     && toText(row.event_status) === '不处置'
   )).length;
   const g9 = g7 > 0 ? formatRatioAsPercentage((g9HandledCount + g9IgnoredCount) / g7, 2) : '0%';
-  const g12 = eventRows.filter((row) => (
+  const legacyG12 = eventRows.filter((row) => (
     isDateInRange(row.create_time, range)
     && isStatisticsEventCountType(row.event_grading_tag)
   )).length;
@@ -1348,20 +1483,45 @@ function buildStatisticsCells(statsContext) {
     eventStats && eventStats.accountSecurityEventCountForE80
   ) || 0;
   const e80 = e80WeakPwdTotal + e80AccountSecurityEventCount;
-  const d10 = e80;
-  const g11 = d6 + d10 + d12;
+  const d10 = c80;
+  const d11WeakPwdTotal = e80WeakPwdTotal + accountSecurityKeywordEventCount;
+  const d6 = d10 + d11WeakPwdTotal + d12;
   const businessSystemStats = buildBusinessSystemStatistics({
     businessSystems,
     assetWorksheet,
+    range,
     eventRows,
-    alarmRows,
-    vulnRows
+    vulnRows,
+    weakPwdSummaryList,
+    weakPwdHandledList
   });
+  const aggregatedBusinessSystemIps = new Set();
+  businessSystemStats.forEach((item) => {
+    (item && Array.isArray(item.ips) ? item.ips : []).forEach(ip => aggregatedBusinessSystemIps.add(ip));
+  });
+  const businessSystemAlarmCounts = businessSystemStats.map((item) => {
+    const ipSet = new Set(item && Array.isArray(item.ips) ? item.ips : []);
+    return countRowsContainingIps(alarmRows, ['host_ip'], ipSet);
+  });
+  const g6 = businessSystemAlarmCounts[0] || 0;
+  const h6 = businessSystemAlarmCounts[1] || 0;
+  const i6 = businessSystemAlarmCounts[2] || 0;
+  const g10 = eventRows.filter((row) => (
+    isEventCategoryType(row.event_grading_tag)
+    && rowContainsAnyIp(row, ['host_ip', 'affected_assets'], aggregatedBusinessSystemIps)
+  )).length;
+  const g12 = businessSystemStats.reduce((total, item) => total + (Number(item && item.total) || 0), 0);
+  const g13 = businessSystemStats.reduce((total, item) => total + (Number(item && item.closedLoopTotal) || 0), 0);
+  const g14 = eventRows.filter((row) => (
+    isStatisticsEventCountType(row.event_grading_tag)
+    && rowContainsAnyIp(row, ['host_ip', 'affected_assets'], aggregatedBusinessSystemIps)
+  )).length;
   const businessSystemCells = {};
   for (let index = 0; index < 3; index += 1) {
     const item = businessSystemStats[index];
     businessSystemCells[`D${3 + index}`] = item ? item.name : '';
     businessSystemCells[`D${7 + index}`] = item ? item.total : '';
+    businessSystemCells[`${XLSX.utils.encode_col(2 + index)}18`] = item ? item.closedLoopTotal : '';
   }
   const topEventManageSubTypeStats = buildTopEventManageSubTypeStats(eventRows, 5);
   const topEventManageSubTypeCells = {};
@@ -1478,18 +1638,18 @@ function buildStatisticsCells(statsContext) {
     ...businessSystemCells,
     D6: d6,
     D10: d10,
-    D11: d11,
+    D11: d11WeakPwdTotal,
     D12: d12,
+    D13: d13,
     D14: d14,
     D15: d15,
     D16: d16,
     D17: d17,
-    D18: d18,
-    D20: '',
-    D21: xdrIn2outLogSearchCount,
-    D22: '',
-    D23: d17,
-    D24: d16,
+    D20: d20,
+    D21: d21,
+    D22: g4,
+    D23: xdrRejectedExternalToInternalCount,
+    D24: d24,
     D25: '',
     D27: xdrLogSearchCount,
     D28: d28,
@@ -1529,6 +1689,10 @@ function buildStatisticsCells(statsContext) {
     D80: d80,
     E80: e80,
     F80: f80,
+    G21: '',
+    G22: g22,
+    G23: d14,
+    G24: d15,
     D83: d83,
     D84: d84,
     D85: d85,
@@ -1555,11 +1719,19 @@ function buildStatisticsCells(statsContext) {
     G4: g4,
     G5: g5,
     G6: g6,
-    G7: g7,
-    G8: g8,
-    G9: g9,
-    G11: g11,
-    G12: g12
+    G7: legacyG6,
+    G8: g7,
+    G9: g8,
+    H6: h6,
+    I6: i6,
+    G10: g10,
+    G11: '',
+    G12: g12,
+    G13: g13,
+    G14: g14,
+    G16: g16,
+    G17: g17,
+    G18: g18
   };
   cells.__blankCells = blankTrendCells.concat(holidaySummaryBlankCells, ['D3', 'D4', 'D5', 'D7', 'D8', 'D9']);
   return cells;
@@ -1605,6 +1777,9 @@ function generateReport(options) {
     exposedSurfaceWorkbookBuffer,
     exposedSurfacePortCount,
     weakPwdSummaryTotal,
+    weakPwdSummaryList,
+    weakPwdHandledTotal,
+    weakPwdHandledList,
     topnReportStats,
     eventData,
     eventStats,
@@ -1614,6 +1789,7 @@ function generateReport(options) {
     vulnRawRowCount,
     xdrIn2outLogSearchCount,
     xdrOut2inLogSearchCount,
+    xdrRejectedExternalToInternalCount,
     xdrMonthlyIn2outLogSearchCounts,
     xdrMonthlyOut2inLogSearchCounts,
     xdrLogSearchCount,
@@ -1673,9 +1849,13 @@ function generateReport(options) {
       exposedSurfaceWorksheet,
       exposedSurfacePortCount,
       weakPwdSummaryTotal,
+      weakPwdSummaryList,
+      weakPwdHandledTotal,
+      weakPwdHandledList,
       topnReportStats,
       xdrIn2outLogSearchCount,
       xdrOut2inLogSearchCount,
+      xdrRejectedExternalToInternalCount,
       xdrMonthlyIn2outLogSearchCounts,
       xdrMonthlyOut2inLogSearchCounts,
       xdrLogSearchCount,

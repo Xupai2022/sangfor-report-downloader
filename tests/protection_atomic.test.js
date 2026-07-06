@@ -287,12 +287,12 @@ function testStatisticsCellsManualOnlyLeavesHolidayAverageBlank() {
   assert.strictEqual(cells.H91, '');
 }
 
-function testStatisticsCellsG11UsesD6D10D12() {
+function testStatisticsCellsUseUpdatedD6D10D11() {
   const cells = dataFormatter.buildStatisticsCells({
     startDate: '2026-03-01',
     endDate: '2026-03-31',
     vulnRows: [
-      { '更新时间': '2026-03-01' },
+      { '更新时间': '2026-03-01', '漏洞等级': '高危', '是否可利用': '是' },
       { '更新时间': '2026-03-31 23:59:59' },
       { '更新时间': '2026-04-01' }
     ],
@@ -306,19 +306,30 @@ function testStatisticsCellsG11UsesD6D10D12() {
         create_time: '2026-04-01',
         type: '未公开威胁',
         affected_assets: ['10.0.0.3']
+      },
+      {
+        create_time: '2026-03-15',
+        __manageSubTypeDisplay: '弱口令检测'
+      },
+      {
+        create_time: '2026-03-16',
+        manage_sub_type_cn: '账号安全异常'
+      },
+      {
+        create_time: '2026-03-17',
+        manage_sub_type_name: '弱密码爆破'
       }
     ],
-    weakPwdSummaryTotal: 3,
-    eventStats: {
-      accountSecurityEventCountForE80: 4
-    }
+    weakPwdSummaryTotal: 3
   });
 
-  assert.strictEqual(cells.D6, 2);
-  assert.strictEqual(cells.D10, 7);
+  assert.strictEqual(cells.D6, 9);
+  assert.strictEqual(cells.D10, 1);
+  assert.strictEqual(cells.D11, 6);
   assert.strictEqual(cells.D12, 2);
-  assert.strictEqual(cells.E80, 7);
-  assert.strictEqual(cells.G11, 11);
+  assert.strictEqual(cells.D6, cells.D10 + cells.D11 + cells.D12);
+  assert.strictEqual(cells.E80, 3);
+  assert.strictEqual(cells.G11, '');
 }
 
 function testWeakPwdSummaryRequestMatchesCapturedTimeRange() {
@@ -330,8 +341,21 @@ function testWeakPwdSummaryRequestMatchesCapturedTimeRange() {
 
   assert.deepStrictEqual(body.found_time, [1767196800000, 1777478400000]);
   assert.strictEqual(body.is_admin, 1);
-  assert.deepStrictEqual(body.service_status, [0]);
+  assert.deepStrictEqual(body.service_status, []);
   assert.strictEqual(body.company_id, '26912728');
+}
+
+function testWeakPwdSummaryRequestSupportsDealStatusFilter() {
+  const body = apiClient.buildWeakPwdSummaryRequestBody({
+    startTime: '2026-01-01',
+    endTime: '2026-04-01',
+    customerId: '26912728',
+    dealStatus: [2]
+  });
+
+  assert.deepStrictEqual(body.found_time, [1767196800000, 1775059200000]);
+  assert.deepStrictEqual(body.deal_status, [2]);
+  assert.deepStrictEqual(body.service_status, []);
 }
 
 function testPopulateStatisticsSheetWritesAndClearsHolidayAverages() {
@@ -380,17 +404,28 @@ function testBusinessSystemStatisticsByAssetIps() {
     businessSystems: ['核心系统A', '系统B', '系统C'],
     assetWorksheet,
     vulnRows: [
-      { IP: '10.0.0.1', '受影响主机/位置': '' },
-      { IP: '', '受影响主机/位置': 'http://10.0.0.2/path' },
-      { IP: '10.0.0.4', '受影响主机/位置': '10.0.0.3' }
+      { IP: '10.0.0.1', '受影响主机/位置': '', '漏洞等级': '高危', '是否可利用': '是', '更新时间': '2026-03-05' },
+      { IP: '', '受影响主机/位置': 'http://10.0.0.2/path', '漏洞等级': '高危', '是否可利用': '是', '更新时间': '2026-03-06' },
+      { IP: '10.0.0.4', '受影响主机/位置': '10.0.0.3', '漏洞等级': '中危', '是否可利用': '是', '更新时间': '2026-03-07' }
     ],
     eventRows: [
-      { create_time: '2026-03-10', host_ip: '10.0.0.4', affected_assets: ['10.0.0.9'] },
-      { create_time: '2026-03-11', host_ip: '', affected_assets: ['10.0.0.3', '10.0.0.2'] }
+      {
+        create_time: '2026-03-10',
+        host_ip: '10.0.0.4',
+        affected_assets: ['10.0.0.9'],
+        manage_sub_type_cn: '账号安全异常'
+      },
+      {
+        create_time: '2026-03-11',
+        host_ip: '',
+        affected_assets: ['10.0.0.3', '10.0.0.2'],
+        type: '未公开威胁'
+      }
     ],
-    alarmRows: [
-      { create_time: '2026-03-12', host_ip: '10.0.0.1' },
-      { create_time: '2026-03-13', host_ip: '10.0.0.3' }
+    weakPwdSummaryList: [
+      { ip: '10.0.0.1' },
+      { ip: '10.0.0.3' },
+      { ip: '10.0.0.4' }
     ]
   });
 
@@ -400,6 +435,221 @@ function testBusinessSystemStatisticsByAssetIps() {
   assert.strictEqual(cells.D7, 4);
   assert.strictEqual(cells.D8, 4);
   assert.strictEqual(cells.D9, 2);
+}
+
+function testStatisticsCellsUseUpdatedD13ToD17() {
+  const cells = dataFormatter.buildStatisticsCells({
+    startDate: '2026-03-01',
+    endDate: '2026-03-31',
+    vulnRows: [
+      { '跟进状态': '已防护', '更新时间': '2026-03-05' },
+      { '跟进状态': '已防护', '更新时间': '2026-04-01' },
+      { '跟进状态': '已修复', '更新时间': '2026-03-06' },
+      { '跟进状态': '已修复', '更新时间': '2026-02-28' }
+    ],
+    eventRows: [
+      {
+        create_time: '2026-03-10',
+        type: '未公开威胁',
+        affected_assets: ['10.0.0.1', '10.0.0.2']
+      },
+      {
+        create_time: '2026-03-12',
+        event_status: '已闭环',
+        manage_sub_type_cn: '账号安全异常'
+      },
+      {
+        create_time: '2026-03-13',
+        event_status: '已闭环',
+        manage_sub_type_cn: '弱密码风险'
+      },
+      {
+        create_time: '2026-03-14',
+        event_status: '处置中',
+        manage_sub_type_cn: '弱口令检测'
+      }
+    ],
+    weakPwdHandledTotal: 6
+  });
+
+  assert.strictEqual(cells.D12, 2);
+  assert.strictEqual(cells.D13, 4);
+  assert.strictEqual(cells.D14, 1);
+  assert.strictEqual(cells.D15, 1);
+  assert.strictEqual(cells.D16, 8);
+  assert.strictEqual(cells.D17, 2);
+}
+
+function testStatisticsCellsUseXdrRejectedExternalToInternalForD23() {
+  const cells = dataFormatter.buildStatisticsCells({
+    startDate: '2026-03-01',
+    endDate: '2026-03-31',
+    xdrRejectedExternalToInternalCount: 26354,
+    eventRows: [
+      {
+        create_time: '2026-03-10',
+        type: '未公开威胁',
+        affected_assets: ['10.0.0.1', '10.0.0.2']
+      }
+    ]
+  });
+
+  assert.strictEqual(cells.D17, 2);
+  assert.strictEqual(cells.D23, 26354);
+}
+
+function testStatisticsCellsUseAlarmAttackDirectionForD24AndMirrorD14D15ToG23G24() {
+  const cells = dataFormatter.buildStatisticsCells({
+    startDate: '2026-03-01',
+    endDate: '2026-03-31',
+    eventStats: {
+      strategyOptimizeCount: 7
+    },
+    xdrRejectedExternalToInternalCount: 20,
+    vulnRows: [
+      { '跟进状态': '已防护', '更新时间': '2026-03-05' },
+      { '跟进状态': '已修复', '更新时间': '2026-03-06' },
+      { '跟进状态': '已防护', '更新时间': '2026-04-01' }
+    ],
+    alarmRows: [
+      { attack_direction: '内-外' },
+      { attack_direction: '外-内' },
+      { attack_direction: '内-外' },
+      { attack_direction: '未知' }
+    ]
+  });
+
+  assert.strictEqual(cells.D14, 1);
+  assert.strictEqual(cells.D15, 1);
+  assert.strictEqual(cells.D24, 2);
+  assert.strictEqual(cells.D21, 22);
+  assert.strictEqual(cells.D22, 7);
+  assert.strictEqual(cells.D20, 24);
+  assert.strictEqual(cells.G21, '');
+  assert.strictEqual(cells.G22, 2);
+  assert.strictEqual(cells.G23, 1);
+  assert.strictEqual(cells.G24, 1);
+}
+
+function testXdrRejectedExternalToInternalRequestMatchesCapturedFilters() {
+  const body = apiClient.buildXdrRejectedExternalToInternalCountRequestBody({
+    start: 1782907517,
+    end: 1782993917
+  });
+
+  assert.strictEqual(body.spl.mappedSpl, '(srcIpTag = 0 and dstIpTag = 1) | filter 动作  in { "拒绝" }');
+  assert.strictEqual(body.spl.originalSpl, '(srcIpTag = 0 and dstIpTag = 1) | filter 动作  in { "拒绝" }');
+  assert.deepStrictEqual(body.spl.extensionParams.frontRender[0].value, [2]);
+  assert.strictEqual(body.spl.extensionParams.frontRender[0].valueText, '拒绝');
+  assert.strictEqual(body.globalCondition.time.timeField, 'recordTimestamp');
+  assert.strictEqual(body.globalCondition.time.begin.value, 1782907517);
+  assert.strictEqual(body.globalCondition.time.end.value, 1782993917);
+  assert.strictEqual(body.viewName, 'NetworkSecurityLogView+EndpointSecurityLogView');
+  assert.strictEqual(body.table.viewName, 'NetworkSecurityLogView+EndpointSecurityLogView');
+}
+
+function testStatisticsCellsUseUpdatedG7ToG10AndG12() {
+  const assetWorksheet = XLSX.utils.aoa_to_sheet([
+    ['', '', ''],
+    ['序号', '业务系统', 'IP'],
+    [1, '核心系统A', '10.0.0.1'],
+    [2, '系统B', '10.0.0.2,10.0.0.3'],
+    [3, '系统C', '10.0.0.4']
+  ]);
+
+  const cells = dataFormatter.buildStatisticsCells({
+    startDate: '2026-03-01',
+    endDate: '2026-03-31',
+    businessSystems: ['核心系统A', '系统B', '系统C'],
+    assetWorksheet,
+    vulnRows: [
+      { IP: '10.0.0.1', '受影响主机/位置': '', '漏洞等级': '高危', '是否可利用': '是', '更新时间': '2026-03-05', '跟进状态': '已闭环' }
+    ],
+    weakPwdSummaryList: [
+      { ip: '10.0.0.2' }
+    ],
+    weakPwdHandledList: [
+      { ip: '10.0.0.2' }
+    ],
+    alarmRows: [
+      { host_ip: '10.0.0.1' },
+      { host_ip: '10.0.0.4' },
+      { host_ip: '10.0.0.99' }
+    ],
+    eventRows: [
+      {
+        create_time: '2026-03-10',
+        event_grading_tag: '一般威胁',
+        push_status: '已通告',
+        '响应时长': 30,
+        host_ip: '10.0.0.1',
+        affected_assets: []
+      },
+      {
+        create_time: '2026-03-11',
+        event_grading_tag: '重大事件',
+        push_status: '已通告',
+        '响应时长': 20,
+        host_ip: '',
+        affected_assets: ['10.0.0.3'],
+        type: '未公开威胁',
+        event_status: '已闭环'
+      },
+      {
+        create_time: '2026-03-12',
+        event_grading_tag: '一般事件',
+        push_status: '未通告',
+        '响应时长': 40,
+        host_ip: '10.0.0.9',
+        affected_assets: ['10.0.0.4'],
+        event_status: '已闭环',
+        manage_sub_type_cn: '账号安全异常'
+      },
+      {
+        create_time: '2026-03-13',
+        event_grading_tag: '其他',
+        push_status: '未通告',
+        '响应时长': 50,
+        host_ip: '10.0.0.99',
+        affected_assets: []
+      }
+    ]
+  });
+
+  assert.strictEqual(cells.G6, 1);
+  assert.strictEqual(cells.H6, 0);
+  assert.strictEqual(cells.I6, 1);
+  assert.strictEqual(cells.G7, 30);
+  assert.strictEqual(cells.G8, 2);
+  assert.strictEqual(cells.G9, 20);
+  assert.strictEqual(cells.G10, 2);
+  assert.strictEqual(cells.G12, cells.D7 + cells.D8 + cells.D9);
+  assert.strictEqual(cells.G13, 4);
+  assert.strictEqual(cells.G14, 3);
+  assert.strictEqual(cells.C18, 1);
+  assert.strictEqual(cells.D18, 2);
+  assert.strictEqual(cells.E18, 1);
+}
+
+function testStatisticsCellsUseUpdatedG16ToG18() {
+  const assetWorksheet = XLSX.utils.aoa_to_sheet([
+    ['', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', ''],
+    ['序号', '业务系统', 'IP', '', '服务类型', '资产类型', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '安全域'],
+    [1, '系统A', '10.0.0.1', '', '服务内（7*24H）', '服务器', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '内网'],
+    [2, '系统B', '10.0.0.2', '', '服务内（5*8H）', '终端', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '内网'],
+    [3, '系统A', '10.0.0.3', '', '服务外', '服务器', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '外网'],
+    [4, '系统C', '10.0.0.4', '', '服务内（7*24H）', '终端', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '内网']
+  ]);
+
+  const cells = dataFormatter.buildStatisticsCells({
+    startDate: '2026-03-01',
+    endDate: '2026-03-31',
+    assetWorksheet
+  });
+
+  assert.strictEqual(cells.G16, 3);
+  assert.strictEqual(cells.G17, 1);
+  assert.strictEqual(cells.G18, 2);
 }
 
 function testBusinessSystemStatisticsStartsAtB3C3() {
@@ -412,13 +662,17 @@ function testBusinessSystemStatisticsStartsAtB3C3() {
   const stats = dataFormatter.buildBusinessSystemStatistics({
     businessSystems: ['核心系统A'],
     assetWorksheet,
+    range: {
+      start: new Date('2026-03-01T00:00:00'),
+      end: new Date('2026-03-31T23:59:59.999')
+    },
     vulnRows: [{ IP: '10.0.0.1' }, { IP: '10.0.0.99' }],
     eventRows: [],
-    alarmRows: []
+    weakPwdSummaryList: []
   });
 
   assert.deepStrictEqual(stats[0].ips, ['10.0.0.1']);
-  assert.strictEqual(stats[0].total, 1);
+  assert.strictEqual(stats[0].total, 0);
 }
 
 function testBusinessSystemStatisticsRejectsMoreThanThree() {
@@ -449,7 +703,7 @@ function testPopulateStatisticsSheetWritesAndClearsBusinessSystemCells() {
     assetWorksheet,
     vulnRows: [],
     eventRows: [],
-    alarmRows: []
+    weakPwdSummaryList: []
   });
 
   assert.strictEqual(ws.D3.v, '核心系统A');
@@ -515,10 +769,17 @@ const tests = [
   testStatisticsCellsIntegerHolidayDailyAverage,
   testStatisticsCellsMissingHolidayCountLeavesAverageBlank,
   testStatisticsCellsManualOnlyLeavesHolidayAverageBlank,
-  testStatisticsCellsG11UsesD6D10D12,
+  testStatisticsCellsUseUpdatedD6D10D11,
   testWeakPwdSummaryRequestMatchesCapturedTimeRange,
+  testWeakPwdSummaryRequestSupportsDealStatusFilter,
   testPopulateStatisticsSheetWritesAndClearsHolidayAverages,
   testBusinessSystemStatisticsByAssetIps,
+  testStatisticsCellsUseUpdatedD13ToD17,
+  testStatisticsCellsUseXdrRejectedExternalToInternalForD23,
+  testStatisticsCellsUseAlarmAttackDirectionForD24AndMirrorD14D15ToG23G24,
+  testStatisticsCellsUseUpdatedG7ToG10AndG12,
+  testStatisticsCellsUseUpdatedG16ToG18,
+  testXdrRejectedExternalToInternalRequestMatchesCapturedFilters,
   testBusinessSystemStatisticsStartsAtB3C3,
   testBusinessSystemStatisticsRejectsMoreThanThree,
   testPopulateStatisticsSheetWritesAndClearsBusinessSystemCells,

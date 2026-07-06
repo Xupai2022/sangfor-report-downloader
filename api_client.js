@@ -42,7 +42,8 @@ const API_CONFIG = {
   topnSrcIpGeoEndpoint: '/order/v1/tool_box/topn/src_ip_geo',
   topnDstIpEndpoint: '/order/v1/tool_box/topn/dst_ip',
   companyEndpoint: '/order/v1/user/company_simple_info',
-  xdrLogSearchCountEndpoint: '/api/apex/logsearch/v1/log/search/count?enableCache=true&viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false'
+  xdrLogSearchCountEndpoint: '/api/apex/logsearch/v1/log/search/count?enableCache=true&viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
+  xdrIncidentAnalysisCountEndpoint: '/ngsoc/INCIDENT/api/v1/table/count/analysisTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false'
 };
 
 /**
@@ -213,6 +214,97 @@ function buildXdrIn2outLogSearchCountRequestBody(params) {
 
 function buildXdrOut2inLogSearchCountRequestBody(params) {
   return buildXdrAccessDirectionLogSearchCountRequestBody(params, 'out2in');
+}
+
+function buildXdrRejectedExternalToInternalCountRequestBody(params) {
+  return {
+    extensionParams: {},
+    spl: {
+      mappedSpl: '(srcIpTag = 0 and dstIpTag = 1) | filter 动作  in { "拒绝" }',
+      originalSpl: '(srcIpTag = 0 and dstIpTag = 1) | filter 动作  in { "拒绝" }',
+      extensionParams: {
+        frontRender: [
+          {
+            displayField: '动作',
+            field: 'action',
+            value: [2],
+            headerType: 'metaType',
+            searchType: 'selector',
+            valueText: '拒绝',
+            isValueNegate: false,
+            type: 'number',
+            filterSelect: 'renderValue'
+          }
+        ],
+        mappedInputSpl: '',
+        originalInputSpl: ''
+      }
+    },
+    serviceInfo: {
+      appName: 'incident',
+      servletContextPath: '/',
+      serviceType: 'table',
+      handler: 'analysisTableQueryHandler'
+    },
+    globalCondition: {
+      branchIds: [],
+      time: {
+        timeField: 'recordTimestamp',
+        end: { type: 'absolute', value: params.end },
+        begin: { type: 'absolute', value: params.start }
+      }
+    },
+    table: {
+      enable: true,
+      viewName: 'NetworkSecurityLogView+EndpointSecurityLogView',
+      aggregationStrategies: null,
+      tableFields: [
+        { field: 'recordTimestamp', show: true, selected: true, sort: 'desc', columnWidth: 100, fixed: null, dataType: 'value' },
+        { field: 'productType', show: true, selected: true, sort: 'disable', columnWidth: 80, fixed: null, dataType: 'value' },
+        { field: 'ruleName', show: true, selected: true, sort: 'disable', columnWidth: 120, fixed: null, dataType: 'value' },
+        { field: 'deviceId', show: true, selected: true, sort: 'disable', columnWidth: 120, fixed: null, dataType: 'value' },
+        { field: 'deviceIp', show: true, selected: true, sort: 'disable', columnWidth: 120, fixed: null, dataType: 'value' },
+        { field: 'srcIp', show: true, selected: true, sort: 'disable', columnWidth: 130, fixed: null, dataType: 'value' },
+        { field: 'srcPort', show: true, selected: true, sort: 'disable', columnWidth: 80, fixed: null, dataType: 'value' },
+        { field: 'dstIp', show: true, selected: true, sort: 'disable', columnWidth: 130, fixed: null, dataType: 'value' },
+        { field: 'dstPort', show: true, selected: true, sort: 'disable', columnWidth: 80, fixed: null, dataType: 'value' },
+        { field: 'threatSubTypeProxy', show: true, selected: true, sort: 'disable', columnWidth: 110, fixed: null, dataType: 'value' },
+        { field: 'attackState', show: true, selected: true, sort: 'disable', columnWidth: 90, fixed: null, dataType: 'value' },
+        { field: 'severity', show: true, selected: true, sort: 'disable', columnWidth: 95, fixed: null, dataType: 'value' },
+        { field: 'requestMethod', show: true, selected: true, sort: 'disable', columnWidth: 150, fixed: null, dataType: 'value' },
+        { field: 'url', show: true, selected: true, sort: 'disable', columnWidth: 110, fixed: null, dataType: 'value' },
+        { field: 'xForwardedFor', show: true, selected: true, sort: 'disable', columnWidth: 140, fixed: null, dataType: 'value' },
+        { field: 'respStatus', show: true, selected: true, sort: 'disable', columnWidth: 110, fixed: null, dataType: 'value' },
+        { field: 'virusName', show: true, selected: true, sort: 'disable', columnWidth: 120, fixed: null, dataType: 'value' },
+        { field: 'username', show: true, selected: true, sort: 'disable', columnWidth: 150, fixed: null, dataType: 'value' },
+        { field: 'hostIp', show: true, selected: true, sort: 'disable', columnWidth: 110, fixed: null, dataType: 'value' },
+        { field: 'fileMd5', show: true, selected: true, sort: 'disable', columnWidth: 130, fixed: null, dataType: 'value' }
+      ],
+      pageNum: 1,
+      pageSize: 20,
+      serviceInfo: {
+        appName: 'incident',
+        servletContextPath: '/',
+        serviceType: 'table',
+        handler: 'analysisTableQueryHandler'
+      },
+      subTable: null,
+      rightClicked: false,
+      selectAllPage: false,
+      routers: [],
+      rightActions: [
+        { name: 'addFilter', type: 'filter', params: null, actionParams: null, applicableCols: null },
+        { name: 'removeFilter', type: 'filter', params: null, actionParams: null, applicableCols: null },
+        { name: 'copyCellText', type: 'copy', params: null, actionParams: null, applicableCols: null }
+      ],
+      extensionParams: {},
+      tag: null
+    },
+    viewName: 'NetworkSecurityLogView+EndpointSecurityLogView',
+    model: 'simple',
+    autoRefresh: false,
+    enableHistory: true
+  };
 }
 
 function buildAlarmRequestBody(params) {
@@ -579,6 +671,7 @@ function buildWeakPwdSummaryRequestBody(params) {
   const startTimestamp = dateToTimestamp(params.startTime);
   const endTimestamp = dateToTimestamp(params.endTime);
   const endOfDay = endTimestamp + 24 * 60 * 60 * 1000;
+  const dealStatus = Array.isArray(params.dealStatus) ? params.dealStatus : [];
 
   return {
     order: 'asc',
@@ -590,14 +683,14 @@ function buildWeakPwdSummaryRequestBody(params) {
     business_level: [],
     src_storage: [],
     src_type: [],
-    service_status: [0],
+    service_status: [],
     scene_tag: [],
     login_time: [],
     found_time: [startTimestamp, endOfDay],
     reappear: 0,
     is_admin: 1,
     risk_level: [],
-    deal_status: [],
+    deal_status: dealStatus,
     company_id: String(params.customerId || '')
   };
 }
@@ -966,6 +1059,32 @@ async function fetchWeakPwdSummaryTotal(cookieInfo, params) {
   }
 
   return total;
+}
+
+async function fetchWeakPwdSummary(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+
+  const requestBody = buildWeakPwdSummaryRequestBody(params);
+  const headers = generateHeaders(cookieString, csrfToken);
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.weakPwdSummaryEndpoint}`;
+
+  console.log(`[ApiClient] 请求弱口令统计参数:`, JSON.stringify(requestBody, null, 2));
+
+  const result = await httpPost(url, headers, JSON.stringify(requestBody));
+  if (!result || result.code !== 0) {
+    throw new Error(`弱口令统计接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const data = (result || {}).data || {};
+  const total = Number(data.total || 0);
+  if (!Number.isFinite(total)) {
+    throw new Error(`弱口令统计 total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  return {
+    total,
+    list: Array.isArray(data.list) ? data.list : []
+  };
 }
 
 async function fetchTopnLoadCondition(cookieInfo, params) {
@@ -1485,6 +1604,32 @@ async function fetchXdrAccessDirectionLogSearchCount(cookieInfo, params, accessD
   return count;
 }
 
+async function fetchXdrRejectedExternalToInternalCount(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
+    throw new Error(`XDR rejected external->internal count 时间范围无效: ${params.start} ~ ${params.end}`);
+  }
+  if (params.start > params.end) {
+    throw new Error(`XDR rejected external->internal count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
+  }
+
+  const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentAnalysisCountEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
+  const body = JSON.stringify(buildXdrRejectedExternalToInternalCountRequestBody(params));
+  const result = await httpPost(url, headers, body);
+
+  if (!result || result.code !== 0 || !result.data) {
+    throw new Error(`XDR rejected external->internal count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const count = Number(result.data.total);
+  if (!Number.isFinite(count)) {
+    throw new Error(`XDR rejected external->internal count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return count;
+}
+
 async function fetchXdrLogSearchCountForRanges(cookieInfo, ranges, params = {}) {
   if (!Array.isArray(ranges) || ranges.length === 0) {
     console.log('[ApiClient] XDR 重保时间段为空，count 记为 0');
@@ -1614,6 +1759,7 @@ module.exports = {
   buildXdrAccessDirectionLogSearchCountRequestBody,
   buildXdrIn2outLogSearchCountRequestBody,
   buildXdrOut2inLogSearchCountRequestBody,
+  buildXdrRejectedExternalToInternalCountRequestBody,
   buildCustomerBusinessUrl,
   buildHomeUrl,
   httpPost,
@@ -1628,6 +1774,7 @@ module.exports = {
   fetchEventTable,
   fetchAlarmTable,
   fetchVulnTable,
+  fetchWeakPwdSummary,
   fetchWeakPwdSummaryTotal,
   fetchTopnLoadCondition,
   fetchTopnDeviceList,
@@ -1653,6 +1800,7 @@ module.exports = {
   fetchXdrAccessDirectionLogSearchCount,
   fetchXdrIn2outLogSearchCount,
   fetchXdrOut2inLogSearchCount,
+  fetchXdrRejectedExternalToInternalCount,
   fetchXdrIn2outLogSearchCountForRanges,
   fetchCompanyPage,
   resolveCompanyIdByName
