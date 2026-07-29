@@ -36,6 +36,7 @@ const API_CONFIG = {
   exposedExportEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/exposed_surface_mss/export_result_report',
   exposedIpListStatisticsEndpoint: '/gateway/vuln-manager/vm/order/v1/vulnmgr/exposed_surface_mss/ip_list_statistics',
   weakPwdSummaryEndpoint: '/gateway/vuln-manager/vm/order/v1/weak_pwd/summary_list',
+  weakPwdListEndpoint: '/gateway/vuln-manager/vm/order/v1/weak_pwd/list',
   topnLoadConditionEndpoint: '/order/v1/tool_box/topn/load_condition',
   topnDeviceListEndpoint: '/order/v1/tool_box/topn/device_list',
   topnThreatTypeEndpoint: '/order/v1/tool_box/topn/threat_type',
@@ -672,11 +673,13 @@ function buildWeakPwdSummaryRequestBody(params) {
   const endTimestamp = dateToTimestamp(params.endTime);
   const endOfDay = endTimestamp + 24 * 60 * 60 * 1000;
   const dealStatus = Array.isArray(params.dealStatus) ? params.dealStatus : [];
+  const pageSize = params.pageSize || 100;
+  const page = params.page || 1;
 
   return {
     order: 'asc',
-    offset: 0,
-    limit: 10,
+    offset: (page - 1) * pageSize,
+    limit: pageSize,
     keyword: '',
     login_status: [],
     is_intranet: [],
@@ -692,6 +695,13 @@ function buildWeakPwdSummaryRequestBody(params) {
     risk_level: [],
     deal_status: dealStatus,
     company_id: String(params.customerId || '')
+  };
+}
+
+function buildWeakPwdListRequestBody(params) {
+  return {
+    ...buildWeakPwdSummaryRequestBody(params),
+    ip: String(params.ip || '')
   };
 }
 
@@ -772,12 +782,16 @@ function buildTopnRequestBody(params, topnCondition, options = {}) {
 }
 
 function buildAssetDownloadRequestBody(params) {
+  const serviceStatus = Array.isArray(params.service_status)
+    ? params.service_status
+    : [1];
+
   return {
     asset_list: [],
     exclude_asset_list: [],
     is_select_all: 1,
     order: 'asc',
-    service_status: [],
+    service_status: serviceStatus,
     is_alive: -1,
     ip_url_keyword: '',
     asset_type: [],
@@ -1062,28 +1076,92 @@ async function fetchWeakPwdSummaryTotal(cookieInfo, params) {
 }
 
 async function fetchWeakPwdSummary(cookieInfo, params) {
-  const { cookieString, csrfToken } = cookieInfo;
+  console.log(`[ApiClient] 开始分页获取弱口令统计...`);
 
-  const requestBody = buildWeakPwdSummaryRequestBody(params);
-  const headers = generateHeaders(cookieString, csrfToken);
-  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.weakPwdSummaryEndpoint}`;
+  const allRows = [];
+  const pageSize = params.pageSize || 100;
+  let page = 1;
+  let hasMore = true;
+  let previousFingerprint = null;
 
-  console.log(`[ApiClient] 请求弱口令统计参数:`, JSON.stringify(requestBody, null, 2));
+  while (hasMore) {
+    console.log(`[ApiClient] 获取弱口令统计第 ${page} 页...`);
+    const { cookieString, csrfToken } = cookieInfo;
+    const requestBody = buildWeakPwdSummaryRequestBody({
+      ...params,
+      page,
+      pageSize
+    });
+    const headers = generateHeaders(cookieString, csrfToken);
+    const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.weakPwdSummaryEndpoint}`;
 
-  const result = await httpPost(url, headers, JSON.stringify(requestBody));
-  if (!result || result.code !== 0) {
-    throw new Error(`弱口令统计接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+    console.log(`[ApiClient] 请求弱口令统计参数:`, JSON.stringify(requestBody, null, 2));
+
+    const result = await httpPost(url, headers, JSON.stringify(requestBody));
+    if (!result || result.code !== 0) {
+      throw new Error(`弱口令统计接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+    }
+
+    const rows = extractRowsFromResponse(result, 'data');
+    if (rows.length === 0) {
+      console.log(`[ApiClient] 弱口令统计第 ${page} 页没有数据。`);
+      hasMore = false;
+      continue;
+    }
+
+    const currentFingerprint = buildPageFingerprint(rows);
+    if (currentFingerprint === previousFingerprint) {
+      throw new Error(`弱口令统计分页疑似未生效，第 ${page} 页返回了与上一页相同的数据，已中止以避免死循环。`);
+    }
+    previousFingerprint = currentFingerprint;
+
+    allRows.push(...rows);
+    console.log(`[ApiClient] 弱口令统计第 ${page} 页获取到 ${rows.length} 条数据，累计 ${allRows.length} 条`);
+
+    hasMore = getHasMoreFromResponse(result, rows, allRows.length, pageSize, 'data');
+    page++;
+
+    const pageDelayMs = Number.isFinite(params.pageDelayMs) ? params.pageDelayMs : 10;
+    if (pageDelayMs > 0 && hasMore) {
+      await sleep(pageDelayMs);
+    }
   }
 
-  const data = (result || {}).data || {};
-  const total = Number(data.total || 0);
-  if (!Number.isFinite(total)) {
-    throw new Error(`弱口令统计 total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  console.log(`[ApiClient] 弱口令统计分页获取完成，共 ${allRows.length} 条数据`);
+
+  const ips = [...new Set(allRows
+    .map(row => String(row && row.ip || '').trim())
+    .filter(Boolean))];
+  let total = 0;
+  for (let index = 0; index < ips.length; index += 1) {
+    const ip = ips[index];
+    const { cookieString, csrfToken } = cookieInfo;
+    const requestBody = buildWeakPwdListRequestBody({ ...params, ip });
+    const headers = generateHeaders(cookieString, csrfToken);
+    const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.weakPwdListEndpoint}`;
+
+    console.log(`[ApiClient] 请求弱口令明细 ${index + 1}/${ips.length}，IP: ${ip}`);
+    const result = await httpPost(url, headers, JSON.stringify(requestBody));
+    if (!result || result.code !== 0) {
+      throw new Error(`IP ${ip} 弱口令明细接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+    }
+
+    const ipTotal = Number((((result || {}).data || {}).total) || 0);
+    if (!Number.isFinite(ipTotal)) {
+      throw new Error(`IP ${ip} 弱口令明细 total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+    }
+    total += ipTotal;
+    console.log(`[ApiClient] IP ${ip} 弱口令数: ${ipTotal}，累计: ${total}`);
+
+    const pageDelayMs = Number.isFinite(params.pageDelayMs) ? params.pageDelayMs : 10;
+    if (pageDelayMs > 0 && index < ips.length - 1) {
+      await sleep(pageDelayMs);
+    }
   }
 
   return {
     total,
-    list: Array.isArray(data.list) ? data.list : []
+    list: allRows
   };
 }
 
@@ -1748,6 +1826,7 @@ module.exports = {
   buildAlarmRequestBody,
   buildVulnRequestBody,
   buildWeakPwdSummaryRequestBody,
+  buildWeakPwdListRequestBody,
   buildTopnLoadConditionRequestBody,
   buildTopnDeviceListRequestBody,
   buildTopnRequestBody,

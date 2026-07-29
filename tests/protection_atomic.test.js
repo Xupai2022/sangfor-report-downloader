@@ -224,6 +224,14 @@ function testOverlappingHolidayAggregation() {
   assert.strictEqual(summary.holidayCounts[midAutumn.key], 30);
 }
 
+function testAssetDownloadRequestUsesServiceStatusOneByDefault() {
+  const body = apiClient.buildAssetDownloadRequestBody({
+    customerId: '99368607'
+  });
+
+  assert.deepStrictEqual(body.service_status, [1]);
+}
+
 function testStatisticsCellsHolidayDailyAverage() {
   const query = dataFormatter.buildProtectionAtomicSecondRanges({
     startDate: '2026-02-18',
@@ -356,6 +364,20 @@ function testWeakPwdSummaryRequestSupportsDealStatusFilter() {
   assert.deepStrictEqual(body.found_time, [1767196800000, 1775059200000]);
   assert.deepStrictEqual(body.deal_status, [2]);
   assert.deepStrictEqual(body.service_status, []);
+}
+
+function testWeakPwdSummaryRequestSupportsPagination() {
+  const body = apiClient.buildWeakPwdSummaryRequestBody({
+    startTime: '2026-01-01',
+    endTime: '2026-04-01',
+    customerId: '26912728',
+    page: 3,
+    pageSize: 200
+  });
+
+  assert.strictEqual(body.offset, 400);
+  assert.strictEqual(body.limit, 200);
+  assert.deepStrictEqual(body.found_time, [1767196800000, 1775059200000]);
 }
 
 function testPopulateStatisticsSheetWritesAndClearsHolidayAverages() {
@@ -765,6 +787,7 @@ const tests = [
   testAtomicRangesMatchMergedRangesWhenNotOverlapped,
   testCountAggregation,
   testOverlappingHolidayAggregation,
+  testAssetDownloadRequestUsesServiceStatusOneByDefault,
   testStatisticsCellsHolidayDailyAverage,
   testStatisticsCellsIntegerHolidayDailyAverage,
   testStatisticsCellsMissingHolidayCountLeavesAverageBlank,
@@ -772,6 +795,7 @@ const tests = [
   testStatisticsCellsUseUpdatedD6D10D11,
   testWeakPwdSummaryRequestMatchesCapturedTimeRange,
   testWeakPwdSummaryRequestSupportsDealStatusFilter,
+  testWeakPwdSummaryRequestSupportsPagination,
   testPopulateStatisticsSheetWritesAndClearsHolidayAverages,
   testBusinessSystemStatisticsByAssetIps,
   testStatisticsCellsUseUpdatedD13ToD17,
