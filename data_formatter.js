@@ -924,7 +924,7 @@ function averageNumbers(values) {
 function isThreatEventType(eventType) {
   const text = toText(eventType);
   if (!text) return false;
-  return ['重要威胁', '一般威胁'].includes(text) || text.includes('威胁');
+  return ['重大威胁', '一般威胁'].includes(text) || text.includes('威胁');
 }
 
 function isEventCategoryType(eventType) {
