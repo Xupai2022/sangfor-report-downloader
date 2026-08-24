@@ -48,7 +48,7 @@ const API_CONFIG = {
   xdrIncidentTableCountEndpoint: '/ngsoc/INCIDENT/api/v1/table/count/incidentTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
   xdrIncidentTableQueryEndpoint: '/ngsoc/INCIDENT/api/v1/table/query/incidentTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
   xdrAlertTableQueryEndpoint: '/ngsoc/INCIDENT/api/v1/table/query/alertTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
-  orderBranchEndpoint: '/gateway/customer-mgr-service/order/v1/branch/dev'
+  orderBranchEndpoint: '/gateway/customer-mgr-service/order/v1/branch/dev?_method=GET'
 };
 
 /**
