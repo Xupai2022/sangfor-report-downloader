@@ -465,9 +465,12 @@ function buildXdrIncidentTableQueryCountRequestBody(params) {
       enable: true,
       viewName: 'IncidentView',
       aggregationStrategies: null,
-      tableFields: [],
+      tableFields: [
+        { field: 'dealStatus', show: true, selected: true, sort: 'disable', columnWidth: 120, fixed: false, dataType: 'value' },
+        { field: 'endTime', show: true, selected: true, sort: 'desc', columnWidth: 160, fixed: false, dataType: 'value' }
+      ],
       pageNum: 1,
-      pageSize: 50,
+      pageSize: 1000,
       serviceInfo: {
         appName: 'incident',
         servletContextPath: '/',
@@ -475,7 +478,7 @@ function buildXdrIncidentTableQueryCountRequestBody(params) {
         handler: 'incidentTableQueryHandler'
       },
       subTable: null,
-      rightClicked: true,
+      rightClicked: false,
       selectAllPage: true,
       routers: [],
       rightActions: [],
@@ -487,7 +490,7 @@ function buildXdrIncidentTableQueryCountRequestBody(params) {
     viewName: 'IncidentView',
     model: 'simple',
     autoRefresh: false,
-    viewInstanceId: '',
+    viewInstanceId: '6904b17d8a099b2dc81a73a7',
     enableHistory: true
   };
 }
@@ -2280,9 +2283,11 @@ async function fetchXdrIncidentTableQueryCount(cookieInfo, params) {
   const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableQueryEndpoint}`;
   const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
   const body = JSON.stringify(buildXdrIncidentTableQueryCountRequestBody(params));
+  console.log('[ApiClient] G102 incidentTable query 请求参数:', body);
   const result = await httpPost(url, headers, body);
 
   if (!result || result.code !== 0 || !result.data) {
+    console.error('[ApiClient] G102 incidentTable query 响应异常:', JSON.stringify(result).substring(0, 1000));
     throw new Error(`XDR incidentTable query count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
   }
 
