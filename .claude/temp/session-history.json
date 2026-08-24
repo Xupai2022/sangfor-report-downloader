@@ -1,0 +1,51 @@
+[
+  {
+    "sessionStart": "2026-07-06T09:30:08.054Z",
+    "sessionEnd": "2026-07-06T09:32:08.486Z",
+    "language": "typescript",
+    "checker": "typescript-checker",
+    "projectDir": "C:/Users/User/Desktop/sangfor-report-downloader"
+  },
+  {
+    "sessionStart": "2026-07-21T03:50:16.724Z",
+    "sessionEnd": "2026-07-21T09:08:17.599Z",
+    "language": "typescript",
+    "checker": "typescript-checker",
+    "projectDir": "C:/Users/User/Desktop/sangfor-report-downloader"
+  },
+  {
+    "sessionStart": "2026-08-11T01:38:06.747Z",
+    "sessionEnd": "2026-08-11T01:38:08.310Z",
+    "language": "typescript",
+    "checker": "typescript-checker",
+    "projectDir": "c:/Users/User/Desktop/sangfor-report-downloader"
+  },
+  {
+    "sessionStart": "2026-08-11T01:53:20.720Z",
+    "sessionEnd": "2026-08-11T01:59:29.447Z",
+    "language": "typescript",
+    "checker": "typescript-checker",
+    "projectDir": "c:/Users/User/Desktop/sangfor-report-downloader"
+  },
+  {
+    "sessionStart": "2026-08-11T02:34:54.110Z",
+    "sessionEnd": "2026-08-13T03:45:46.274Z",
+    "language": "typescript",
+    "checker": "typescript-checker",
+    "projectDir": "c:/Users/User/Desktop/sangfor-report-downloader"
+  },
+  {
+    "sessionStart": "2026-08-19T07:02:23.700Z",
+    "sessionEnd": "2026-08-19T07:02:25.322Z",
+    "language": "typescript",
+    "checker": "typescript-checker",
+    "projectDir": "c:/Users/User/Desktop/sangfor-report-downloader"
+  },
+  {
+    "sessionStart": "2026-08-19T07:02:23.700Z",
+    "sessionEnd": "2026-08-19T07:22:49.316Z",
+    "language": "typescript",
+    "checker": "typescript-checker",
+    "projectDir": "c:/Users/User/Desktop/sangfor-report-downloader"
+  }
+]

@@ -1236,10 +1236,19 @@ function buildStatisticsCells(statsContext) {
     xdrIn2outLogSearchCount = '',
     xdrOut2inLogSearchCount = '',
     xdrRejectedExternalToInternalCount = '',
+    xdrG99LogSearchCount = '',
+    xdrG100AlertCount = '',
+    xdrG101IncidentCount = '',
+    xdrG102IncidentHandledCount = '',
+    xdrG103IncidentCount = '',
+    xdrG105IncidentCount = '',
+    xdrG106IncidentCount = '',
+    xdrG107IncidentCount = '',
     xdrMonthlyIn2outLogSearchCounts = [],
     xdrMonthlyOut2inLogSearchCounts = [],
     xdrLogSearchCount = '',
-    xdrHolidayLogSearchCounts = {}
+    xdrHolidayLogSearchCounts = {},
+    orderBranchCounts = {}
   } = statsContext || {};
 
   const range = buildInclusiveDateRange(startDate, endDate);
@@ -1629,6 +1638,20 @@ function buildStatisticsCells(statsContext) {
     holidaySummaryCells[`H${row}`] = '100%';
   });
 
+  const d101 = toNumericOrNull(orderBranchCounts && orderBranchCounts.d101) || 0;
+  const d102 = toNumericOrNull(orderBranchCounts && orderBranchCounts.d102) || 0;
+  const d100 = d101 + d102;
+  const d105 = toNumericOrNull(orderBranchCounts && orderBranchCounts.d105) || 0;
+  const g99 = toNumericOrNull(xdrG99LogSearchCount) || 0;
+  const g100 = toNumericOrNull(xdrG100AlertCount) || 0;
+  const g101 = toNumericOrNull(xdrG101IncidentCount) || 0;
+  const g102 = toNumericOrNull(xdrG102IncidentHandledCount) || 0;
+  const g103 = toNumericOrNull(xdrG103IncidentCount) || 0;
+  const g104 = g102 - g103;
+  const g105 = toNumericOrNull(xdrG105IncidentCount) || 0;
+  const g106 = toNumericOrNull(xdrG106IncidentCount) || 0;
+  const g107 = toNumericOrNull(xdrG107IncidentCount) || 0;
+
   const cells = {
     J1: customer || '',
     L1: formatReportDate(startDate),
@@ -1731,7 +1754,20 @@ function buildStatisticsCells(statsContext) {
     G14: g14,
     G16: g16,
     G17: g17,
-    G18: g18
+    G18: g18,
+    G99: g99,
+    G100: g100,
+    G101: g101,
+    G102: g102,
+    G103: g103,
+    G104: g104,
+    G105: g105,
+    G106: g106,
+    G107: g107,
+    D100: d100,
+    D101: d101,
+    D102: d102,
+    D105: d105
   };
   cells.__blankCells = blankTrendCells.concat(holidaySummaryBlankCells, ['D3', 'D4', 'D5', 'D7', 'D8', 'D9']);
   return cells;
@@ -1790,10 +1826,19 @@ function generateReport(options) {
     xdrIn2outLogSearchCount,
     xdrOut2inLogSearchCount,
     xdrRejectedExternalToInternalCount,
+    xdrG99LogSearchCount,
+    xdrG100AlertCount,
+    xdrG101IncidentCount,
+    xdrG102IncidentHandledCount,
+    xdrG103IncidentCount,
+    xdrG105IncidentCount,
+    xdrG106IncidentCount,
+    xdrG107IncidentCount,
     xdrMonthlyIn2outLogSearchCounts,
     xdrMonthlyOut2inLogSearchCounts,
     xdrLogSearchCount,
     xdrHolidayLogSearchCounts,
+    orderBranchCounts,
     outputDir,
     eventHeaders,
     alarmHeaders,
@@ -1856,10 +1901,19 @@ function generateReport(options) {
       xdrIn2outLogSearchCount,
       xdrOut2inLogSearchCount,
       xdrRejectedExternalToInternalCount,
+      xdrG99LogSearchCount,
+      xdrG100AlertCount,
+      xdrG101IncidentCount,
+      xdrG102IncidentHandledCount,
+      xdrG103IncidentCount,
+      xdrG105IncidentCount,
+      xdrG106IncidentCount,
+      xdrG107IncidentCount,
       xdrMonthlyIn2outLogSearchCounts,
       xdrMonthlyOut2inLogSearchCounts,
       xdrLogSearchCount,
-      xdrHolidayLogSearchCounts
+      xdrHolidayLogSearchCounts,
+      orderBranchCounts
     });
 
     ensureOutputDir(reportFilePath);

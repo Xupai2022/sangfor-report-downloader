@@ -536,8 +536,17 @@ async function downloadReports(options) {
       xdrIn2outLogSearchCount: null,
       xdrOut2inLogSearchCount: null,
       xdrRejectedExternalToInternalCount: null,
+      xdrG99LogSearchCount: null,
+      xdrG100AlertCount: null,
+      xdrG101IncidentCount: null,
+      xdrG102IncidentHandledCount: null,
+      xdrG103IncidentCount: null,
+      xdrG105IncidentCount: null,
+      xdrG106IncidentCount: null,
+      xdrG107IncidentCount: null,
       xdrMonthlyIn2outLogSearchCounts: [],
       xdrMonthlyOut2inLogSearchCounts: [],
+      orderBranchCounts: {},
       assetError: null,
       exposedSurfaceError: null,
       eventError: null,
@@ -680,6 +689,41 @@ async function downloadReports(options) {
       throw new Error(`已处理弱口令统计失败: ${error.message}`);
     }
 
+    console.log('\n--- 查询订单列表统计 (D100/D101/D102/D105) ---');
+    try {
+      const d101 = await requestWithRetry(
+        (params) => apiClient.fetchOrderBranchTotal(cookieInfo, params, 3),
+        requestParams
+      );
+      const d102Type25 = await requestWithRetry(
+        (params) => apiClient.fetchOrderBranchTotal(cookieInfo, params, 25),
+        requestParams
+      );
+      const d102Type999 = await requestWithRetry(
+        (params) => apiClient.fetchOrderBranchTotal(cookieInfo, params, 999),
+        requestParams
+      );
+      const d105 = await requestWithRetry(
+        (params) => apiClient.fetchOrderBranchTotal(cookieInfo, params, 12),
+        requestParams
+      );
+      results.orderBranchCounts = {
+        d101,
+        d102Type25,
+        d102Type999,
+        d102: d102Type25 + d102Type999,
+        d100: d101 + d102Type25 + d102Type999,
+        d105
+      };
+      console.log(`[成功] 订单列表统计: D101=${results.orderBranchCounts.d101} (type=3)`);
+      console.log(`[成功] 订单列表统计: D102=${results.orderBranchCounts.d102} (type=25=${d102Type25} + type=999=${d102Type999})`);
+      console.log(`[成功] 订单列表统计: D100=${results.orderBranchCounts.d100}`);
+      console.log(`[成功] 订单列表统计: D105=${results.orderBranchCounts.d105} (type=12)`);
+    } catch (error) {
+      results.orderBranchError = error.message;
+      throw new Error(`订单列表统计失败: ${error.message}`);
+    }
+
     console.log('\n--- 查询 SOAR TopN 统计 ---');
     try {
       results.topnReportStats = await requestWithRetry(
@@ -737,6 +781,38 @@ async function downloadReports(options) {
         () => apiClient.fetchXdrRejectedExternalToInternalCount(xdrCookieInfo, reportRange),
         requestParams
       );
+      results.xdrG99LogSearchCount = await requestWithRetry(
+        () => apiClient.fetchXdrLogSearchCount(xdrCookieInfo, reportRange),
+        requestParams
+      );
+      results.xdrG101IncidentCount = await requestWithRetry(
+        () => apiClient.fetchXdrIncidentTableCount(xdrCookieInfo, reportRange),
+        requestParams
+      );
+      results.xdrG100AlertCount = await requestWithRetry(
+        () => apiClient.fetchXdrAlertTableCount(xdrCookieInfo, reportRange),
+        requestParams
+      );
+      results.xdrG102IncidentHandledCount = await requestWithRetry(
+        () => apiClient.fetchXdrIncidentTableQueryCount(xdrCookieInfo, reportRange),
+        requestParams
+      );
+      results.xdrG103IncidentCount = await requestWithRetry(
+        () => apiClient.fetchXdrG103IncidentCount(xdrCookieInfo, reportRange),
+        requestParams
+      );
+      results.xdrG105IncidentCount = await requestWithRetry(
+        () => apiClient.fetchXdrG105IncidentCount(xdrCookieInfo, reportRange),
+        requestParams
+      );
+      results.xdrG106IncidentCount = await requestWithRetry(
+        () => apiClient.fetchXdrG106IncidentCount(xdrCookieInfo, reportRange),
+        requestParams
+      );
+      results.xdrG107IncidentCount = await requestWithRetry(
+        () => apiClient.fetchXdrG107IncidentCount(xdrCookieInfo, reportRange),
+        requestParams
+      );
       results.xdrMonthlyIn2outLogSearchCounts = [];
       results.xdrMonthlyOut2inLogSearchCounts = [];
       for (let index = 0; index < reportMonthRanges.length; index += 1) {
@@ -781,6 +857,14 @@ async function downloadReports(options) {
       console.log(`[成功] XDR in2out 日志统计: ${results.xdrIn2outLogSearchCount}`);
       console.log(`[成功] XDR out2in 日志统计: ${results.xdrOut2inLogSearchCount}`);
       console.log(`[成功] XDR 外到内拒绝日志统计: ${results.xdrRejectedExternalToInternalCount}`);
+      console.log(`[成功] XDR 报告期日志统计 (G99): ${results.xdrG99LogSearchCount}`);
+      console.log(`[成功] XDR 报告期事件表统计 (G101): ${results.xdrG101IncidentCount}`);
+      console.log(`[成功] XDR 报告期告警表统计 (G100): ${results.xdrG100AlertCount}`);
+      console.log(`[成功] XDR 报告期已处置事件表统计 (G102): ${results.xdrG102IncidentHandledCount}`);
+      console.log(`[成功] XDR 报告期人工决策已处置非白名单事件表统计 (G103): ${results.xdrG103IncidentCount}`);
+      console.log(`[成功] XDR 报告期已处置(非白名单)事件表统计 (G105): ${results.xdrG105IncidentCount}`);
+      console.log(`[成功] XDR 报告期处置中/挂起事件表统计 (G106): ${results.xdrG106IncidentCount}`);
+      console.log(`[成功] XDR 报告期待处置事件表统计 (G107): ${results.xdrG107IncidentCount}`);
       console.log(`[成功] XDR 月度 in2out 日志统计: ${results.xdrMonthlyIn2outLogSearchCounts.map(item => `${item.monthLabel}:${item.count}`).join(', ')}`);
       console.log(`[成功] XDR 月度 out2in 日志统计: ${results.xdrMonthlyOut2inLogSearchCounts.map(item => `${item.monthLabel}:${item.count}`).join(', ')}`);
       console.log(`[成功] XDR 重保日志统计: ${results.xdrLogSearchCount}`);
@@ -837,8 +921,17 @@ async function downloadReports(options) {
       xdrIn2outLogSearchCount: results.xdrIn2outLogSearchCount,
       xdrOut2inLogSearchCount: results.xdrOut2inLogSearchCount,
       xdrRejectedExternalToInternalCount: results.xdrRejectedExternalToInternalCount,
+      xdrG99LogSearchCount: results.xdrG99LogSearchCount,
+      xdrG100AlertCount: results.xdrG100AlertCount,
+      xdrG101IncidentCount: results.xdrG101IncidentCount,
+      xdrG102IncidentHandledCount: results.xdrG102IncidentHandledCount,
+      xdrG103IncidentCount: results.xdrG103IncidentCount,
+      xdrG105IncidentCount: results.xdrG105IncidentCount,
+      xdrG106IncidentCount: results.xdrG106IncidentCount,
+      xdrG107IncidentCount: results.xdrG107IncidentCount,
       xdrMonthlyIn2outLogSearchCounts: results.xdrMonthlyIn2outLogSearchCounts,
       xdrMonthlyOut2inLogSearchCounts: results.xdrMonthlyOut2inLogSearchCounts,
+      orderBranchCounts: results.orderBranchCounts,
       outputDir: options.outputDir || CONFIG.outputDir,
       eventHeaders: soarTransformer.EVENT_OUTPUT_FIELDS,
       alarmHeaders: soarTransformer.ALARM_OUTPUT_FIELDS,

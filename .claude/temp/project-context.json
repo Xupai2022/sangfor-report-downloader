@@ -1,0 +1,14 @@
+{
+  "sessionStart": "2026-08-24T06:14:25.264Z",
+  "projectDir": "c:/Users/User/Desktop/sangfor-report-downloader",
+  "language": "typescript",
+  "checker": "typescript-checker",
+  "detectedBy": "package.json",
+  "pluginVersion": "1.0.0",
+  "languageVersion": null,
+  "projectName": "sangfor-report-downloader",
+  "framework": null,
+  "dependencies": [
+    "xlsx"
+  ]
+}

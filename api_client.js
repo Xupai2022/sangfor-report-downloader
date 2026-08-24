@@ -44,7 +44,11 @@ const API_CONFIG = {
   topnDstIpEndpoint: '/order/v1/tool_box/topn/dst_ip',
   companyEndpoint: '/order/v1/user/company_simple_info',
   xdrLogSearchCountEndpoint: '/api/apex/logsearch/v1/log/search/count?enableCache=true&viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
-  xdrIncidentAnalysisCountEndpoint: '/ngsoc/INCIDENT/api/v1/table/count/analysisTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false'
+  xdrIncidentAnalysisCountEndpoint: '/ngsoc/INCIDENT/api/v1/table/count/analysisTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
+  xdrIncidentTableCountEndpoint: '/ngsoc/INCIDENT/api/v1/table/count/incidentTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
+  xdrIncidentTableQueryEndpoint: '/ngsoc/INCIDENT/api/v1/table/query/incidentTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
+  xdrAlertTableQueryEndpoint: '/ngsoc/INCIDENT/api/v1/table/query/alertTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
+  orderBranchEndpoint: '/gateway/customer-mgr-service/order/v1/branch/dev'
 };
 
 /**
@@ -304,6 +308,473 @@ function buildXdrRejectedExternalToInternalCountRequestBody(params) {
     viewName: 'NetworkSecurityLogView+EndpointSecurityLogView',
     model: 'simple',
     autoRefresh: false,
+    enableHistory: true
+  };
+}
+
+function buildXdrIncidentTableCountRequestBody(params) {
+  return {
+    extensionParams: null,
+    spl: {
+      mappedSpl: '',
+      originalSpl: '',
+      extensionParams: {
+        frontRender: [],
+        mappedInputSpl: '',
+        originalInputSpl: ''
+      }
+    },
+    serviceInfo: {
+      appName: 'incident',
+      servletContextPath: '/',
+      serviceType: 'table',
+      handler: 'incidentTableQueryHandler'
+    },
+    globalCondition: {
+      branchIds: [],
+      time: {
+        timeField: 'endTime',
+        begin: { type: 'absolute', unit: null, value: params.start },
+        end: { type: 'absolute', unit: null, value: params.end }
+      }
+    },
+    table: {
+      enable: true,
+      viewName: 'IncidentView',
+      aggregationStrategies: null,
+      tableFields: [],
+      pageNum: 1,
+      pageSize: 1000,
+      serviceInfo: {
+        appName: 'incident',
+        servletContextPath: '/',
+        serviceType: 'table',
+        handler: 'incidentTableQueryHandler'
+      },
+      subTable: null,
+      rightClicked: true,
+      selectAllPage: true,
+      routers: [],
+      rightActions: [],
+      extensionParams: {
+        spl: 'filter xthConfirm= true'
+      },
+      tag: null
+    },
+    viewName: 'IncidentView',
+    model: 'simple',
+    viewInstanceId: '',
+    enableHistory: true
+  };
+}
+
+function buildXdrAlertTableCountRequestBody(params) {
+  return {
+    extensionParams: null,
+    spl: {
+      mappedSpl: '',
+      originalSpl: '',
+      extensionParams: {
+        frontRender: [],
+        mappedInputSpl: '',
+        originalInputSpl: ''
+      }
+    },
+    serviceInfo: {
+      appName: 'incident',
+      servletContextPath: '/',
+      serviceType: 'table',
+      handler: 'alertTableQueryHandler'
+    },
+    globalCondition: {
+      branchIds: [],
+      time: {
+        timeField: 'lastTime',
+        begin: { type: 'absolute', value: params.start },
+        end: { type: 'absolute', value: params.end }
+      }
+    },
+    table: {
+      enable: true,
+      viewName: 'AlertView',
+      aggregationStrategies: null,
+      tableFields: [],
+      pageNum: 1,
+      pageSize: 50,
+      serviceInfo: {
+        appName: 'incident',
+        servletContextPath: '/',
+        serviceType: 'table',
+        handler: 'alertTableQueryHandler'
+      },
+      subTable: null,
+      rightClicked: false,
+      selectAllPage: true,
+      routers: [],
+      rightActions: [],
+      extensionParams: {},
+      tag: null
+    },
+    viewName: 'AlertView',
+    model: 'expert',
+    autoRefresh: false,
+    viewInstanceId: '',
+    enableHistory: true
+  };
+}
+
+function buildXdrIncidentTableQueryCountRequestBody(params) {
+  return {
+    extensionParams: null,
+    spl: {
+      mappedSpl: 'filter 处置状态  in { "处置完成" }',
+      originalSpl: 'filter 处置状态  in { "处置完成" }',
+      extensionParams: {
+        frontRender: [
+          {
+            displayField: '处置状态',
+            field: 'dealStatus',
+            value: [3],
+            headerType: 'metaType',
+            searchType: 'selector',
+            valueText: '处置完成',
+            isValueNegate: false,
+            type: 'string',
+            filterSelect: 'renderValue'
+          }
+        ],
+        mappedInputSpl: '',
+        originalInputSpl: ''
+      }
+    },
+    serviceInfo: {
+      appName: 'incident',
+      servletContextPath: '/',
+      serviceType: 'table',
+      handler: 'incidentTableQueryHandler'
+    },
+    globalCondition: {
+      branchIds: [],
+      time: {
+        timeField: 'endTime',
+        begin: { type: 'absolute', unit: null, value: params.start },
+        end: { type: 'absolute', unit: null, value: params.end }
+      }
+    },
+    table: {
+      enable: true,
+      viewName: 'IncidentView',
+      aggregationStrategies: null,
+      tableFields: [],
+      pageNum: 1,
+      pageSize: 50,
+      serviceInfo: {
+        appName: 'incident',
+        servletContextPath: '/',
+        serviceType: 'table',
+        handler: 'incidentTableQueryHandler'
+      },
+      subTable: null,
+      rightClicked: true,
+      selectAllPage: true,
+      routers: [],
+      rightActions: [],
+      extensionParams: {
+        spl: 'filter xthConfirm= true'
+      },
+      tag: null
+    },
+    viewName: 'IncidentView',
+    model: 'simple',
+    autoRefresh: false,
+    viewInstanceId: '',
+    enableHistory: true
+  };
+}
+
+function buildXdrG105IncidentCountRequestBody(params) {
+  return {
+    extensionParams: null,
+    spl: {
+      mappedSpl: 'manualType != 1 | filter 处置状态  in { "已遏制", "处置完成", "已忽略" } | filter 加白状态  in { "未加白" }',
+      originalSpl: 'manualType != 1 | filter 处置状态  in { "已遏制", "处置完成", "已忽略" } | filter 加白状态  in { "未加白" }',
+      extensionParams: {
+        frontRender: [
+          {
+            displayField: '处置状态',
+            field: 'dealStatus',
+            value: [6, 3, 5],
+            headerType: 'metaType',
+            searchType: 'selector',
+            valueText: '已遏制, 处置完成, 已忽略',
+            isValueNegate: false,
+            type: 'string',
+            filterSelect: 'renderValue'
+          },
+          {
+            displayField: '加白状态',
+            field: 'whiteStatus',
+            value: ['未加白'],
+            headerType: 'alertWhiteStatus',
+            searchType: 'selector',
+            valueText: '未加白',
+            isValueNegate: false,
+            type: 'string',
+            filterSelect: 'renderValue'
+          }
+        ],
+        mappedInputSpl: 'manualType != 1',
+        originalInputSpl: 'manualType != 1'
+      }
+    },
+    serviceInfo: {
+      appName: 'incident',
+      servletContextPath: '/',
+      serviceType: 'table',
+      handler: 'incidentTableQueryHandler'
+    },
+    globalCondition: {
+      branchIds: [],
+      time: {
+        timeField: 'endTime',
+        begin: { type: 'absolute', value: params.start },
+        end: { type: 'absolute', value: params.end }
+      }
+    },
+    table: {
+      enable: true,
+      viewName: 'IncidentView',
+      aggregationStrategies: null,
+      tableFields: [],
+      pageNum: 1,
+      pageSize: 50,
+      serviceInfo: {
+        appName: 'incident',
+        servletContextPath: '/',
+        serviceType: 'table',
+        handler: 'incidentTableQueryHandler'
+      },
+      subTable: null,
+      rightClicked: true,
+      selectAllPage: true,
+      routers: [],
+      rightActions: [],
+      extensionParams: {
+        spl: 'filter xthConfirm= true'
+      },
+      tag: null
+    },
+    viewName: 'IncidentView',
+    model: 'expert',
+    autoRefresh: false,
+    viewInstanceId: '6719cafbd619f06373baa6ba',
+    enableHistory: true
+  };
+}
+
+function buildXdrG103IncidentCountRequestBody(params) {
+  return {
+    extensionParams: null,
+    spl: {
+      mappedSpl: 'filter 处置执行方式 in { "人工决策处置" } and  加白状态 != "已加白"  | filter 处置状态  in { "处置完成" }',
+      originalSpl: 'filter 处置执行方式 in { "人工决策处置" } and  加白状态 != "已加白"  | filter 处置状态  in { "处置完成" }',
+      extensionParams: {
+        frontRender: [
+          {
+            displayField: '处置状态',
+            field: 'dealStatus',
+            value: [3],
+            headerType: 'metaType',
+            searchType: 'selector',
+            valueText: '处置完成',
+            isValueNegate: false,
+            type: 'string',
+            filterSelect: 'renderValue'
+          }
+        ],
+        mappedInputSpl: 'filter 处置执行方式 in { "人工决策处置" } and  加白状态 != "已加白" ',
+        originalInputSpl: 'filter 处置执行方式 in { "人工决策处置" } and  加白状态 != "已加白" '
+      }
+    },
+    serviceInfo: {
+      appName: 'incident',
+      servletContextPath: '/',
+      serviceType: 'table',
+      handler: 'incidentTableQueryHandler'
+    },
+    globalCondition: {
+      branchIds: [],
+      time: {
+        timeField: 'endTime',
+        begin: { type: 'absolute', value: params.start },
+        end: { type: 'absolute', value: params.end }
+      }
+    },
+    table: {
+      enable: true,
+      viewName: 'IncidentView',
+      aggregationStrategies: null,
+      tableFields: [],
+      pageNum: 1,
+      pageSize: 50,
+      serviceInfo: {
+        appName: 'incident',
+        servletContextPath: '/',
+        serviceType: 'table',
+        handler: 'incidentTableQueryHandler'
+      },
+      subTable: null,
+      rightClicked: true,
+      selectAllPage: true,
+      routers: [],
+      rightActions: [],
+      extensionParams: {
+        spl: 'filter xthConfirm= true'
+      },
+      tag: null
+    },
+    viewName: 'IncidentView',
+    model: 'expert',
+    autoRefresh: false,
+    viewInstanceId: '6719cafbd619f06373baa6ba',
+    enableHistory: true
+  };
+}
+
+function buildXdrG106IncidentCountRequestBody(params) {
+  return {
+    extensionParams: null,
+    spl: {
+      mappedSpl: 'filter 处置状态  in { "处置中", "挂起" }',
+      originalSpl: 'filter 处置状态  in { "处置中", "挂起" }',
+      extensionParams: {
+        frontRender: [
+          {
+            displayField: '处置状态',
+            field: 'dealStatus',
+            value: [4, 2],
+            headerType: 'metaType',
+            searchType: 'selector',
+            valueText: '处置中, 挂起',
+            isValueNegate: false,
+            type: 'string',
+            filterSelect: 'renderValue'
+          }
+        ],
+        mappedInputSpl: '',
+        originalInputSpl: ''
+      }
+    },
+    serviceInfo: {
+      appName: 'incident',
+      servletContextPath: '/',
+      serviceType: 'table',
+      handler: 'incidentTableQueryHandler'
+    },
+    globalCondition: {
+      branchIds: [],
+      time: {
+        timeField: 'endTime',
+        begin: { type: 'absolute', value: params.start },
+        end: { type: 'absolute', value: params.end }
+      }
+    },
+    table: {
+      enable: true,
+      viewName: 'IncidentView',
+      aggregationStrategies: null,
+      tableFields: [],
+      pageNum: 1,
+      pageSize: 50,
+      serviceInfo: {
+        appName: 'incident',
+        servletContextPath: '/',
+        serviceType: 'table',
+        handler: 'incidentTableQueryHandler'
+      },
+      subTable: null,
+      rightClicked: true,
+      selectAllPage: true,
+      routers: [],
+      rightActions: [],
+      extensionParams: {
+        spl: 'filter xthConfirm= true'
+      },
+      tag: null
+    },
+    viewName: 'IncidentView',
+    model: 'expert',
+    autoRefresh: false,
+    viewInstanceId: '',
+    enableHistory: true
+  };
+}
+
+function buildXdrG107IncidentCountRequestBody(params) {
+  return {
+    extensionParams: null,
+    spl: {
+      mappedSpl: 'filter 处置状态  in { "待处置" }',
+      originalSpl: 'filter 处置状态  in { "待处置" }',
+      extensionParams: {
+        frontRender: [
+          {
+            displayField: '处置状态',
+            field: 'dealStatus',
+            value: [1],
+            headerType: 'metaType',
+            searchType: 'selector',
+            valueText: '待处置',
+            isValueNegate: false,
+            type: 'string',
+            filterSelect: 'renderValue'
+          }
+        ],
+        mappedInputSpl: '',
+        originalInputSpl: ''
+      }
+    },
+    serviceInfo: {
+      appName: 'incident',
+      servletContextPath: '/',
+      serviceType: 'table',
+      handler: 'incidentTableQueryHandler'
+    },
+    globalCondition: {
+      branchIds: [],
+      time: {
+        timeField: 'endTime',
+        begin: { type: 'absolute', value: params.start },
+        end: { type: 'absolute', value: params.end }
+      }
+    },
+    table: {
+      enable: true,
+      viewName: 'IncidentView',
+      aggregationStrategies: null,
+      tableFields: [],
+      pageNum: 1,
+      pageSize: 50,
+      serviceInfo: {
+        appName: 'incident',
+        servletContextPath: '/',
+        serviceType: 'table',
+        handler: 'incidentTableQueryHandler'
+      },
+      subTable: null,
+      rightClicked: true,
+      selectAllPage: true,
+      routers: [],
+      rightActions: [],
+      extensionParams: {
+        spl: 'filter xthConfirm= true'
+      },
+      tag: null
+    },
+    viewName: 'IncidentView',
+    model: 'expert',
+    autoRefresh: false,
+    viewInstanceId: '',
     enableHistory: true
   };
 }
@@ -1075,6 +1546,42 @@ async function fetchWeakPwdSummaryTotal(cookieInfo, params) {
   return total;
 }
 
+function buildOrderBranchRequestBody(params, orderType) {
+  return {
+    order: 'asc',
+    offset: 0,
+    limit: 10,
+    keyword: '',
+    type: orderType,
+    status: 0,
+    company_id: String(params.customerId || ''),
+    platform_type: 'scloud',
+    belong_local_xdr: 0
+  };
+}
+
+async function fetchOrderBranchTotal(cookieInfo, params, orderType) {
+  const { cookieString, csrfToken } = cookieInfo;
+
+  const requestBody = buildOrderBranchRequestBody(params, orderType);
+  const headers = generateHeaders(cookieString, csrfToken);
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.orderBranchEndpoint}`;
+
+  console.log(`[ApiClient] 请求订单列表统计(type=${orderType})参数:`, JSON.stringify(requestBody, null, 2));
+
+  const result = await httpPost(url, headers, JSON.stringify(requestBody));
+  if (!result || result.code !== 0 || !result.data) {
+    throw new Error(`订单列表统计(type=${orderType})接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const total = Number(result.data.total);
+  if (!Number.isFinite(total)) {
+    throw new Error(`订单列表统计(type=${orderType})响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  return total;
+}
+
 async function fetchWeakPwdSummary(cookieInfo, params) {
   console.log(`[ApiClient] 开始分页获取弱口令统计...`);
 
@@ -1708,6 +2215,188 @@ async function fetchXdrRejectedExternalToInternalCount(cookieInfo, params) {
   return count;
 }
 
+async function fetchXdrIncidentTableCount(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
+    throw new Error(`XDR incidentTable count 时间范围无效: ${params.start} ~ ${params.end}`);
+  }
+  if (params.start > params.end) {
+    throw new Error(`XDR incidentTable count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
+  }
+
+  const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableCountEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
+  const body = JSON.stringify(buildXdrIncidentTableCountRequestBody(params));
+  const result = await httpPost(url, headers, body);
+
+  if (!result || result.code !== 0 || !result.data) {
+    throw new Error(`XDR incidentTable count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const count = Number(result.data.total);
+  if (!Number.isFinite(count)) {
+    throw new Error(`XDR incidentTable count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return count;
+}
+
+async function fetchXdrAlertTableCount(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
+    throw new Error(`XDR alertTable count 时间范围无效: ${params.start} ~ ${params.end}`);
+  }
+  if (params.start > params.end) {
+    throw new Error(`XDR alertTable count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
+  }
+
+  const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrAlertTableQueryEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
+  const body = JSON.stringify(buildXdrAlertTableCountRequestBody(params));
+  const result = await httpPost(url, headers, body);
+
+  if (!result || result.code !== 0 || !result.data) {
+    throw new Error(`XDR alertTable count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const count = Number(result.data.total);
+  if (!Number.isFinite(count)) {
+    throw new Error(`XDR alertTable count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return count;
+}
+
+async function fetchXdrIncidentTableQueryCount(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
+    throw new Error(`XDR incidentTable query count 时间范围无效: ${params.start} ~ ${params.end}`);
+  }
+  if (params.start > params.end) {
+    throw new Error(`XDR incidentTable query count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
+  }
+
+  const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableQueryEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
+  const body = JSON.stringify(buildXdrIncidentTableQueryCountRequestBody(params));
+  const result = await httpPost(url, headers, body);
+
+  if (!result || result.code !== 0 || !result.data) {
+    throw new Error(`XDR incidentTable query count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const count = Number(result.data.total);
+  if (!Number.isFinite(count)) {
+    throw new Error(`XDR incidentTable query count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return count;
+}
+
+async function fetchXdrG103IncidentCount(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
+    throw new Error(`XDR G103 incident count 时间范围无效: ${params.start} ~ ${params.end}`);
+  }
+  if (params.start > params.end) {
+    throw new Error(`XDR G103 incident count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
+  }
+
+  const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableCountEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
+  const body = JSON.stringify(buildXdrG103IncidentCountRequestBody(params));
+  const result = await httpPost(url, headers, body);
+
+  if (!result || result.code !== 0 || !result.data) {
+    throw new Error(`XDR G103 incident count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const count = Number(result.data.total);
+  if (!Number.isFinite(count)) {
+    throw new Error(`XDR G103 incident count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return count;
+}
+
+async function fetchXdrG105IncidentCount(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
+    throw new Error(`XDR G105 incident count 时间范围无效: ${params.start} ~ ${params.end}`);
+  }
+  if (params.start > params.end) {
+    throw new Error(`XDR G105 incident count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
+  }
+
+  const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableCountEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
+  const body = JSON.stringify(buildXdrG105IncidentCountRequestBody(params));
+  const result = await httpPost(url, headers, body);
+
+  if (!result || result.code !== 0 || !result.data) {
+    throw new Error(`XDR G105 incident count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const count = Number(result.data.total);
+  if (!Number.isFinite(count)) {
+    throw new Error(`XDR G105 incident count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return count;
+}
+
+async function fetchXdrG106IncidentCount(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
+    throw new Error(`XDR G106 incident count 时间范围无效: ${params.start} ~ ${params.end}`);
+  }
+  if (params.start > params.end) {
+    throw new Error(`XDR G106 incident count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
+  }
+
+  const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableQueryEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
+  const body = JSON.stringify(buildXdrG106IncidentCountRequestBody(params));
+  const result = await httpPost(url, headers, body);
+
+  if (!result || result.code !== 0 || !result.data) {
+    throw new Error(`XDR G106 incident count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const count = Number(result.data.total);
+  if (!Number.isFinite(count)) {
+    throw new Error(`XDR G106 incident count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return count;
+}
+
+async function fetchXdrG107IncidentCount(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
+    throw new Error(`XDR G107 incident count 时间范围无效: ${params.start} ~ ${params.end}`);
+  }
+  if (params.start > params.end) {
+    throw new Error(`XDR G107 incident count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
+  }
+
+  const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableQueryEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
+  const body = JSON.stringify(buildXdrG107IncidentCountRequestBody(params));
+  const result = await httpPost(url, headers, body);
+
+  if (!result || result.code !== 0 || !result.data) {
+    throw new Error(`XDR G107 incident count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const count = Number(result.data.total);
+  if (!Number.isFinite(count)) {
+    throw new Error(`XDR G107 incident count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return count;
+}
+
 async function fetchXdrLogSearchCountForRanges(cookieInfo, ranges, params = {}) {
   if (!Array.isArray(ranges) || ranges.length === 0) {
     console.log('[ApiClient] XDR 重保时间段为空，count 记为 0');
@@ -1839,6 +2528,13 @@ module.exports = {
   buildXdrIn2outLogSearchCountRequestBody,
   buildXdrOut2inLogSearchCountRequestBody,
   buildXdrRejectedExternalToInternalCountRequestBody,
+  buildXdrIncidentTableCountRequestBody,
+  buildXdrIncidentTableQueryCountRequestBody,
+  buildXdrG103IncidentCountRequestBody,
+  buildXdrG105IncidentCountRequestBody,
+  buildXdrG106IncidentCountRequestBody,
+  buildXdrG107IncidentCountRequestBody,
+  buildXdrAlertTableCountRequestBody,
   buildCustomerBusinessUrl,
   buildHomeUrl,
   httpPost,
@@ -1855,6 +2551,8 @@ module.exports = {
   fetchVulnTable,
   fetchWeakPwdSummary,
   fetchWeakPwdSummaryTotal,
+  buildOrderBranchRequestBody,
+  fetchOrderBranchTotal,
   fetchTopnLoadCondition,
   fetchTopnDeviceList,
   fetchTopnThreatTypes,
@@ -1880,6 +2578,13 @@ module.exports = {
   fetchXdrIn2outLogSearchCount,
   fetchXdrOut2inLogSearchCount,
   fetchXdrRejectedExternalToInternalCount,
+  fetchXdrIncidentTableCount,
+  fetchXdrIncidentTableQueryCount,
+  fetchXdrG103IncidentCount,
+  fetchXdrG105IncidentCount,
+  fetchXdrG106IncidentCount,
+  fetchXdrG107IncidentCount,
+  fetchXdrAlertTableCount,
   fetchXdrIn2outLogSearchCountForRanges,
   fetchCompanyPage,
   resolveCompanyIdByName

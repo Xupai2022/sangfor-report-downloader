@@ -38,25 +38,6 @@ node "$HOME\.openclaw\workspace\skills\sangfor-report-downloader\sangfor_downloa
   --xdr-cookie-path "M:\Users\$env:USERNAME\Downloads\xdr_cookies.txt"
 ```
 
-如果使用客户 ID：
-
-```powershell
-node "$HOME\.openclaw\workspace\skills\sangfor-report-downloader\sangfor_downloader.js" `
-  --customer-id 26912728 `
-  --start "2026-05-12" `
-  --end "2026-05-13" `
-  --cookie-path "M:\Users\$env:USERNAME\Downloads\cookies.txt" `
-  --xdr-cookie-path "M:\Users\$env:USERNAME\Downloads\xdr_cookies.txt"
-```
-
-可选报告类型：
-
-```text
-all, asset, exposed, event, alarm, vuln
-```
-
-默认是 `all`。
-
 `exposed` 会调用暴露面接口：先用 `company_id` 获取 `target_company_list`，按客户中文名匹配 `target_company` 并取 `target_company_id`；如果只有一个目标公司则直接使用该 ID。随后导出暴露面 zip，提取其中唯一的 xlsx，并把该 xlsx 的统计 sheet 写入总报告的 `暴露面` sheet。
 
 ## 输出
