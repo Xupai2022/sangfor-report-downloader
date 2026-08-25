@@ -2374,7 +2374,7 @@ async function fetchXdrG106IncidentCount(cookieInfo, params) {
   }
 
   const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
-  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableQueryEndpoint}`;
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableCountEndpoint}`;
   const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
   const body = JSON.stringify(buildXdrG106IncidentCountRequestBody(params));
   const result = await httpPost(url, headers, body);
