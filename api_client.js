@@ -540,8 +540,8 @@ function buildXdrG105IncidentCountRequestBody(params) {
       branchIds: [],
       time: {
         timeField: 'endTime',
-        begin: { type: 'absolute', value: params.start },
-        end: { type: 'absolute', value: params.end }
+        begin: { type: 'absolute', unit: null, value: params.start },
+        end: { type: 'absolute', unit: null, value: params.end }
       }
     },
     table: {
@@ -550,7 +550,7 @@ function buildXdrG105IncidentCountRequestBody(params) {
       aggregationStrategies: null,
       tableFields: [],
       pageNum: 1,
-      pageSize: 50,
+      pageSize: 1000,
       serviceInfo: {
         appName: 'incident',
         servletContextPath: '/',
@@ -558,7 +558,7 @@ function buildXdrG105IncidentCountRequestBody(params) {
         handler: 'incidentTableQueryHandler'
       },
       subTable: null,
-      rightClicked: true,
+      rightClicked: false,
       selectAllPage: true,
       routers: [],
       rightActions: [],
@@ -570,7 +570,7 @@ function buildXdrG105IncidentCountRequestBody(params) {
     viewName: 'IncidentView',
     model: 'expert',
     autoRefresh: false,
-    viewInstanceId: '6719cafbd619f06373baa6ba',
+    viewInstanceId: '6904b17d8a099b2dc81a73a7',
     enableHistory: true
   };
 }
@@ -2283,11 +2283,11 @@ async function fetchXdrIncidentTableQueryCount(cookieInfo, params) {
   const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableCountEndpoint}`;
   const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
   const body = JSON.stringify(buildXdrIncidentTableQueryCountRequestBody(params));
-  console.log('[ApiClient] G102 incidentTable count 请求参数:', body);
+  console.log('[ApiClient] G102 incidentTable count request body:', body);
   const result = await httpPost(url, headers, body);
 
   if (!result || result.code !== 0 || !result.data) {
-    console.error('[ApiClient] G102 incidentTable count 响应异常:', JSON.stringify(result).substring(0, 1000));
+    console.error('[ApiClient] G102 incidentTable count invalid response:', JSON.stringify(result).substring(0, 1000));
     throw new Error(`XDR G102 incidentTable count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
   }
 
@@ -2295,7 +2295,7 @@ async function fetchXdrIncidentTableQueryCount(cookieInfo, params) {
   if (!Number.isFinite(count)) {
     throw new Error(`XDR G102 incidentTable count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
   }
-  console.log(`[G102] XDR incidentTable count 返回 total: ${count}`);
+  console.log(`[G102] XDR incidentTable count total: ${count}`);
   return count;
 }
 
@@ -2348,6 +2348,7 @@ async function fetchXdrG105IncidentCount(cookieInfo, params) {
   if (!Number.isFinite(count)) {
     throw new Error(`XDR G105 incident count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
   }
+  console.log(`[G105] XDR incidentTable count total: ${count}`);
   return count;
 }
 
