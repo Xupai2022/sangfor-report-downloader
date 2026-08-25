@@ -2400,7 +2400,7 @@ async function fetchXdrG107IncidentCount(cookieInfo, params) {
   }
 
   const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
-  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableQueryEndpoint}`;
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableCountEndpoint}`;
   const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
   const body = JSON.stringify(buildXdrG107IncidentCountRequestBody(params));
   const result = await httpPost(url, headers, body);
@@ -2413,6 +2413,7 @@ async function fetchXdrG107IncidentCount(cookieInfo, params) {
   if (!Number.isFinite(count)) {
     throw new Error(`XDR G107 incident count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
   }
+  console.log(`[G107] XDR incidentTable count total: ${count}`);
   return count;
 }
 
