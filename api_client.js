@@ -565,7 +565,13 @@ function buildXdrG105IncidentCountRequestBody(params) {
       extensionParams: {
         spl: 'filter xthConfirm= true'
       },
-      tag: null
+      tag: [{
+        field: 'fromXth',
+        fieldValue: true,
+        tagColor: '#1C6EFF',
+        tagValue: 'XTH',
+        tagSuspendedValue: 'XTH：云端主动威胁狩猎'
+      }]
     },
     viewName: 'IncidentView',
     model: 'expert',
@@ -747,8 +753,8 @@ function buildXdrG107IncidentCountRequestBody(params) {
       branchIds: [],
       time: {
         timeField: 'endTime',
-        begin: { type: 'absolute', value: params.start },
-        end: { type: 'absolute', value: params.end }
+        begin: { type: 'absolute', unit: null, value: params.start },
+        end: { type: 'absolute', unit: null, value: params.end }
       }
     },
     table: {
@@ -757,7 +763,7 @@ function buildXdrG107IncidentCountRequestBody(params) {
       aggregationStrategies: null,
       tableFields: [],
       pageNum: 1,
-      pageSize: 50,
+      pageSize: 1000,
       serviceInfo: {
         appName: 'incident',
         servletContextPath: '/',
@@ -765,19 +771,25 @@ function buildXdrG107IncidentCountRequestBody(params) {
         handler: 'incidentTableQueryHandler'
       },
       subTable: null,
-      rightClicked: true,
+      rightClicked: false,
       selectAllPage: true,
       routers: [],
       rightActions: [],
       extensionParams: {
         spl: 'filter xthConfirm= true'
       },
-      tag: null
+      tag: [{
+        field: 'fromXth',
+        fieldValue: true,
+        tagColor: '#1C6EFF',
+        tagValue: 'XTH',
+        tagSuspendedValue: 'XTH：云端主动威胁狩猎'
+      }]
     },
     viewName: 'IncidentView',
     model: 'expert',
     autoRefresh: false,
-    viewInstanceId: '',
+    viewInstanceId: '6904b17d8a099b2dc81a73a7',
     enableHistory: true
   };
 }
