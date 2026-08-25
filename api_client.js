@@ -1154,6 +1154,36 @@ function buildVulnRequestBody(params) {
   };
 }
 
+function buildVulnPortSplitTotalRequestBody(params) {
+  const startTimestamp = dateToTimestamp(params.startTime);
+  const endTimestamp = dateToTimestamp(params.endTime);
+  const endOfDay = endTimestamp + 24 * 60 * 60 * 1000 - 1000;
+
+  return {
+    order: {},
+    offset: 0,
+    limit: 50,
+    keyword: '',
+    vulnerability_status: [2, 4],
+    dev_id: [],
+    fix_level: -1,
+    src_storage: [],
+    src_type: ['tss'],
+    is_intranet: -1,
+    service_status: 0,
+    vuln_type: -1,
+    is_high_availability: -1,
+    protection_rule: [],
+    asset_list: [],
+    scene_tag: [],
+    scan_method: -1,
+    found_time: [],
+    last_time: [startTimestamp, endOfDay],
+    vulnerability_level: -1,
+    company_id: String(params.customerId || '')
+  };
+}
+
 function buildWeakPwdSummaryRequestBody(params) {
   const startTimestamp = dateToTimestamp(params.startTime);
   const endTimestamp = dateToTimestamp(params.endTime);
@@ -1537,6 +1567,25 @@ async function fetchVulnTable(cookieInfo, params) {
   console.log(`[ApiClient] 请求资产漏洞表参数:`, JSON.stringify(requestBody, null, 2));
 
   return httpPost(url, headers, JSON.stringify(requestBody));
+}
+
+async function fetchVulnPortSplitTotal(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  const requestBody = buildVulnPortSplitTotalRequestBody(params);
+  const headers = generateHeaders(cookieString, csrfToken);
+  const url = `https://${API_CONFIG.baseUrl}${API_CONFIG.vulnEndpoint}`;
+
+  console.log(`[ApiClient] 请求漏洞端口拆分统计参数:`, JSON.stringify(requestBody, null, 2));
+  const result = await httpPost(url, headers, JSON.stringify(requestBody));
+  if (!result || result.code !== 0 || !result.data) {
+    throw new Error(`漏洞端口拆分统计接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  const total = Number(result.data.total);
+  if (!Number.isFinite(total)) {
+    throw new Error(`漏洞端口拆分统计响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+  return total;
 }
 
 async function fetchWeakPwdSummaryTotal(cookieInfo, params) {
@@ -2534,6 +2583,7 @@ module.exports = {
   buildRequestBody,
   buildAlarmRequestBody,
   buildVulnRequestBody,
+  buildVulnPortSplitTotalRequestBody,
   buildWeakPwdSummaryRequestBody,
   buildWeakPwdListRequestBody,
   buildTopnLoadConditionRequestBody,
@@ -2569,6 +2619,7 @@ module.exports = {
   fetchEventTable,
   fetchAlarmTable,
   fetchVulnTable,
+  fetchVulnPortSplitTotal,
   fetchWeakPwdSummary,
   fetchWeakPwdSummaryTotal,
   buildOrderBranchRequestBody,

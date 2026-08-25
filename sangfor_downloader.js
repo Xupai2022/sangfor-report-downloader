@@ -408,6 +408,17 @@ function validateDate(dateStr) {
   return true;
 }
 
+function subtractDays(dateStr, days) {
+  if (!dateStr) return dateStr;
+  const date = new Date(`${dateStr}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  date.setDate(date.getDate() - days);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 /**
  * 等待用户按回车继续
  */
@@ -529,6 +540,8 @@ async function downloadReports(options) {
       weakPwdSummaryList: [],
       weakPwdHandledTotal: null,
       weakPwdHandledList: [],
+      d129: null,
+      e130: null,
       topnReportStats: null,
       xdrLogSearchCount: null,
       xdrHolidayLogSearchCounts: {},
@@ -687,6 +700,51 @@ async function downloadReports(options) {
     } catch (error) {
       results.weakPwdError = error.message;
       throw new Error(`已处理弱口令统计失败: ${error.message}`);
+    }
+
+    console.log('\n--- 查询漏洞端口拆分统计 (D129) ---');
+    if (!options.protectStartDate || !options.protectEndDate) {
+      results.d129 = '无hw时间无数据';
+      console.log(`[跳过] 未传入完整 hw 时间，D129=${results.d129}`);
+    } else {
+      try {
+        const d129RequestParams = {
+          ...requestParams,
+          startTime: subtractDays(options.protectStartDate, 7),
+          endTime: options.protectEndDate
+        };
+        results.d129 = await requestWithRetry(
+          (params) => apiClient.fetchVulnPortSplitTotal(cookieInfo, params),
+          d129RequestParams
+        );
+        console.log(`[成功] 漏洞端口拆分统计: D129=${results.d129}`);
+      } catch (error) {
+        results.vulnPortSplitError = error.message;
+        throw new Error(`漏洞端口拆分统计失败: ${error.message}`);
+      }
+    }
+
+    console.log('\n--- 查询 hw 时间事件总数 (E130) ---');
+    if (!options.protectStartDate || !options.protectEndDate) {
+      results.e130 = '无hw时间无数据';
+      console.log(`[跳过] 未传入完整 hw 时间，E130=${results.e130}`);
+    } else {
+      try {
+        const hwEventRequestParams = {
+          ...requestParams,
+          startTime: options.protectStartDate,
+          endTime: options.protectEndDate
+        };
+        const hwEventRows = await requestWithRetry(
+          (params) => apiClient.fetchAllPages(apiClient.fetchEventTable, cookieInfo, params, 'data'),
+          hwEventRequestParams
+        );
+        results.e130 = Array.isArray(hwEventRows) ? hwEventRows.length : 0;
+        console.log(`[成功] hw 时间事件总数: E130=${results.e130}`);
+      } catch (error) {
+        results.hwEventError = error.message;
+        throw new Error(`hw 时间事件统计失败: ${error.message}`);
+      }
     }
 
     console.log('\n--- 查询订单列表统计 (D100/D101/D102/D105) ---');
@@ -908,6 +966,8 @@ async function downloadReports(options) {
       weakPwdSummaryList: results.weakPwdSummaryList,
       weakPwdHandledTotal: results.weakPwdHandledTotal,
       weakPwdHandledList: results.weakPwdHandledList,
+      d129: results.d129,
+      e130: results.e130,
       topnReportStats: results.topnReportStats,
       reportTemplatePath: options.reportTemplatePath,
       eventData: transformedEventData,

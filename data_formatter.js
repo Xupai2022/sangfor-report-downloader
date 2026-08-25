@@ -1232,6 +1232,8 @@ function buildStatisticsCells(statsContext) {
     weakPwdSummaryList = [],
     weakPwdHandledTotal = 0,
     weakPwdHandledList = [],
+    d129 = '',
+    e130 = '',
     topnReportStats = null,
     xdrIn2outLogSearchCount = '',
     xdrOut2inLogSearchCount = '',
@@ -1365,6 +1367,14 @@ function buildStatisticsCells(statsContext) {
   const d83 = countVulnByLevel('高危');
   const d84 = countVulnByLevel('中危');
   const d85 = countVulnByLevel('低危');
+  // D110/D111 对应资产漏洞表中高危漏洞总数及其唯一 IP 数量。
+  const highRiskIpSet = new Set(
+    highRiskVulnRows
+      .map(row => toText(row && row['IP']).trim())
+      .filter(Boolean)
+  );
+  const d110 = highRiskVulnRows.length;
+  const d111 = highRiskIpSet.size;
   const e83 = countHandledVulnByLevel('高危');
   const e84 = countHandledVulnByLevel('中危');
   const e85 = countHandledVulnByLevel('低危');
@@ -1374,6 +1384,14 @@ function buildStatisticsCells(statsContext) {
   const i79 = getWorksheetCellValue(exposedSurfaceWorksheet, 'E4');
   const i80 = getWorksheetCellValue(exposedSurfaceWorksheet, 'E5');
   const i81 = exposedSurfacePortCount;
+  const d128 = Array.from({ length: 12 }, (_, index) => index + 2)
+    .reduce((total, rowNumber) => {
+      const value = toNumericOrNull(getWorksheetCellValue(
+        exposedSurfaceWorksheet,
+        `E${rowNumber}`
+      ));
+      return total + (value === null ? 0 : value);
+    }, 0);
   const i82 = vulnRows.filter(row => toText(row['内/外网']) === '外网').length;
   const k79 = countAssetRowsByCriteria(assetWorksheet, {
     assetType: '服务器',
@@ -1494,6 +1512,7 @@ function buildStatisticsCells(statsContext) {
   const e80 = e80WeakPwdTotal + e80AccountSecurityEventCount;
   const d10 = c80;
   const d11WeakPwdTotal = e80WeakPwdTotal + accountSecurityKeywordEventCount;
+  const d112 = d11WeakPwdTotal;
   const d6 = d10 + d11WeakPwdTotal + d12;
   const businessSystemStats = buildBusinessSystemStatistics({
     businessSystems,
@@ -1719,6 +1738,12 @@ function buildStatisticsCells(statsContext) {
     D83: d83,
     D84: d84,
     D85: d85,
+    D110: d110,
+    D111: d111,
+    D112: d112,
+    D129: d129,
+    E130: e130,
+    D128: d128,
     E83: e83,
     E84: e84,
     E85: e85,
@@ -1816,6 +1841,8 @@ function generateReport(options) {
     weakPwdSummaryList,
     weakPwdHandledTotal,
     weakPwdHandledList,
+    d129,
+    e130,
     topnReportStats,
     eventData,
     eventStats,
@@ -1897,6 +1924,8 @@ function generateReport(options) {
       weakPwdSummaryList,
       weakPwdHandledTotal,
       weakPwdHandledList,
+      d129,
+      e130,
       topnReportStats,
       xdrIn2outLogSearchCount,
       xdrOut2inLogSearchCount,
