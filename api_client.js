@@ -2295,6 +2295,7 @@ async function fetchXdrIncidentTableQueryCount(cookieInfo, params) {
   if (!Number.isFinite(count)) {
     throw new Error(`XDR incidentTable query count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
   }
+  console.log(`[G102] XDR incidentTable query 返回 total: ${count}`);
   return count;
 }
 
