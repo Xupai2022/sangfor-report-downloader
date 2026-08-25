@@ -541,7 +541,7 @@ async function downloadReports(options) {
       weakPwdHandledTotal: null,
       weakPwdHandledList: [],
       d129: null,
-      e130: null,
+      d130: null,
       topnReportStats: null,
       xdrLogSearchCount: null,
       xdrHolidayLogSearchCounts: {},
@@ -557,6 +557,8 @@ async function downloadReports(options) {
       xdrG105IncidentCount: null,
       xdrG106IncidentCount: null,
       xdrG107IncidentCount: null,
+      xdrAlertThreatDefineCounts: [],
+      xdrIncidentThreatDefineCounts: [],
       xdrMonthlyIn2outLogSearchCounts: [],
       xdrMonthlyOut2inLogSearchCounts: [],
       orderBranchCounts: {},
@@ -724,10 +726,10 @@ async function downloadReports(options) {
       }
     }
 
-    console.log('\n--- 查询 hw 时间事件总数 (E130) ---');
+    console.log('\n--- 查询 hw 时间事件总数 (D130) ---');
     if (!options.protectStartDate || !options.protectEndDate) {
-      results.e130 = '无hw时间无数据';
-      console.log(`[跳过] 未传入完整 hw 时间，E130=${results.e130}`);
+      results.d130 = '无hw时间无数据';
+      console.log(`[跳过] 未传入完整 hw 时间，D130=${results.d130}`);
     } else {
       try {
         const hwEventRequestParams = {
@@ -739,8 +741,8 @@ async function downloadReports(options) {
           (params) => apiClient.fetchAllPages(apiClient.fetchEventTable, cookieInfo, params, 'data'),
           hwEventRequestParams
         );
-        results.e130 = Array.isArray(hwEventRows) ? hwEventRows.length : 0;
-        console.log(`[成功] hw 时间事件总数: E130=${results.e130}`);
+        results.d130 = Array.isArray(hwEventRows) ? hwEventRows.length : 0;
+        console.log(`[成功] hw 时间事件总数: D130=${results.d130}`);
       } catch (error) {
         results.hwEventError = error.message;
         throw new Error(`hw 时间事件统计失败: ${error.message}`);
@@ -815,9 +817,7 @@ async function downloadReports(options) {
       });
       const protectionQuery = dataFormatter.buildProtectionAtomicSecondRanges({
         startDate: options.startDate,
-        endDate: options.endDate,
-        protectStartDate: options.protectStartDate,
-        protectEndDate: options.protectEndDate
+        endDate: options.endDate
       });
       const protectionRanges = protectionQuery.ranges;
       console.log(`[XDR] in2out/out2in 查询时间段: ${reportRange.start} ~ ${reportRange.end}`);
@@ -849,6 +849,14 @@ async function downloadReports(options) {
       );
       results.xdrG100AlertCount = await requestWithRetry(
         () => apiClient.fetchXdrAlertTableCount(xdrCookieInfo, reportRange),
+        requestParams
+      );
+      results.xdrAlertThreatDefineCounts = await requestWithRetry(
+        () => apiClient.fetchXdrAlertThreatDefineCounts(xdrCookieInfo, reportRange),
+        requestParams
+      );
+      results.xdrIncidentThreatDefineCounts = await requestWithRetry(
+        () => apiClient.fetchXdrIncidentThreatDefineCounts(xdrCookieInfo, reportRange),
         requestParams
       );
       results.xdrG102IncidentHandledCount = await requestWithRetry(
@@ -918,6 +926,8 @@ async function downloadReports(options) {
       console.log(`[成功] XDR 报告期日志统计 (G99): ${results.xdrG99LogSearchCount}`);
       console.log(`[成功] XDR 报告期事件表统计 (G101): ${results.xdrG101IncidentCount}`);
       console.log(`[成功] XDR 报告期告警表统计 (G100): ${results.xdrG100AlertCount}`);
+      console.log(`[成功] XDR 告警威胁定义统计: ${results.xdrAlertThreatDefineCounts.map(item => `${item.label}:${item.count}`).join(', ')}`);
+      console.log(`[成功] XDR 事件威胁定义统计: ${results.xdrIncidentThreatDefineCounts.map(item => `${item.label}:${item.count}`).join(', ')}`);
       console.log(`[成功] XDR 报告期已处置事件表统计 (G102): ${results.xdrG102IncidentHandledCount}`);
       console.log(`[成功] XDR 报告期人工决策已处置非白名单事件表统计 (G103): ${results.xdrG103IncidentCount}`);
       console.log(`[成功] XDR 报告期已处置(非白名单)事件表统计 (G105): ${results.xdrG105IncidentCount}`);
@@ -967,7 +977,7 @@ async function downloadReports(options) {
       weakPwdHandledTotal: results.weakPwdHandledTotal,
       weakPwdHandledList: results.weakPwdHandledList,
       d129: results.d129,
-      e130: results.e130,
+      d130: results.d130,
       topnReportStats: results.topnReportStats,
       reportTemplatePath: options.reportTemplatePath,
       eventData: transformedEventData,
@@ -989,6 +999,8 @@ async function downloadReports(options) {
       xdrG105IncidentCount: results.xdrG105IncidentCount,
       xdrG106IncidentCount: results.xdrG106IncidentCount,
       xdrG107IncidentCount: results.xdrG107IncidentCount,
+      xdrAlertThreatDefineCounts: results.xdrAlertThreatDefineCounts,
+      xdrIncidentThreatDefineCounts: results.xdrIncidentThreatDefineCounts,
       xdrMonthlyIn2outLogSearchCounts: results.xdrMonthlyIn2outLogSearchCounts,
       xdrMonthlyOut2inLogSearchCounts: results.xdrMonthlyOut2inLogSearchCounts,
       orderBranchCounts: results.orderBranchCounts,

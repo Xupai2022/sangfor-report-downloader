@@ -1213,6 +1213,41 @@ function setWorksheetBlankPercentCell(ws, address) {
   delete cell.f;
 }
 
+function setWorksheetPercentCellValue(ws, address, value) {
+  setWorksheetCellValue(ws, address, value);
+  ws[address].z = '0.00%';
+}
+
+function buildThreatDefineStatisticsCells(items, {
+  labelRow,
+  countRow = null,
+  ratioRow,
+  startColumn = 2,
+  maxItems = Number.POSITIVE_INFINITY
+}) {
+  const rows = Array.isArray(items) ? items : [];
+  const total = rows.reduce((sum, item) => {
+    const count = Number(item && item.count);
+    return Number.isFinite(count) && count >= 0 ? sum + count : sum;
+  }, 0);
+  const cells = {};
+  const percentCells = [];
+
+  rows.slice(0, maxItems).forEach((item, index) => {
+    const count = Number(item && item.count);
+    if (!Number.isFinite(count) || count < 0) return;
+    const col = XLSX.utils.encode_col(startColumn + index);
+    cells[`${col}${labelRow}`] = item && item.label ? String(item.label) : '';
+    if (countRow !== null) {
+      cells[`${col}${countRow}`] = count;
+    }
+    cells[`${col}${ratioRow}`] = total > 0 ? count / total : 0;
+    percentCells.push(`${col}${ratioRow}`);
+  });
+
+  return { cells, percentCells };
+}
+
 function buildStatisticsCells(statsContext) {
   const {
     customer,
@@ -1233,7 +1268,7 @@ function buildStatisticsCells(statsContext) {
     weakPwdHandledTotal = 0,
     weakPwdHandledList = [],
     d129 = '',
-    e130 = '',
+    d130 = '',
     topnReportStats = null,
     xdrIn2outLogSearchCount = '',
     xdrOut2inLogSearchCount = '',
@@ -1246,6 +1281,8 @@ function buildStatisticsCells(statsContext) {
     xdrG105IncidentCount = '',
     xdrG106IncidentCount = '',
     xdrG107IncidentCount = '',
+    xdrAlertThreatDefineCounts = [],
+    xdrIncidentThreatDefineCounts = [],
     xdrMonthlyIn2outLogSearchCounts = [],
     xdrMonthlyOut2inLogSearchCounts = [],
     xdrLogSearchCount = '',
@@ -1259,14 +1296,9 @@ function buildStatisticsCells(statsContext) {
     range
   );
   const holidayPeriods = protectionPeriods.filter(period => period.source === 'holiday');
-  const mergedProtectionRanges = mergeInclusiveRanges(protectionPeriods);
-  const manualProtectionPeriod = protectionPeriods.find(period => period.source === 'manual');
-  const shouldCountManualProtectionPeriod = Boolean(
-    manualProtectionPeriod
-    && rangesOverlap(manualProtectionPeriod.range, range)
-    && !holidayPeriods.some(period => rangeContains(period.range, manualProtectionPeriod.range))
-  );
-  const importantProtectionCount = holidayPeriods.length + (shouldCountManualProtectionPeriod ? 1 : 0);
+  // D90/D91 and their source metrics only cover the built-in holiday protection periods.
+  const mergedHolidayProtectionRanges = mergeInclusiveRanges(holidayPeriods);
+  const importantProtectionCount = holidayPeriods.length;
   const startMonth = addMonths(range.start, 0);
   const displayMonthCount = Math.min(
     12,
@@ -1495,12 +1527,12 @@ function buildStatisticsCells(statsContext) {
   const d28 = countRowsInProtectionRanges(
     alarmRows,
     ['create_time', '创建时间', '告警创建时间'],
-    mergedProtectionRanges
+    mergedHolidayProtectionRanges
   );
   const d29 = countRowsInProtectionRanges(
     eventRows,
     ['create_time', '事件创建时间', '创建时间'],
-    mergedProtectionRanges
+    mergedHolidayProtectionRanges
   );
   const g4 = eventStats && eventStats.strategyOptimizeCount !== undefined
     ? eventStats.strategyOptimizeCount
@@ -1670,6 +1702,17 @@ function buildStatisticsCells(statsContext) {
   const g105 = toNumericOrNull(xdrG105IncidentCount) || 0;
   const g106 = toNumericOrNull(xdrG106IncidentCount) || 0;
   const g107 = toNumericOrNull(xdrG107IncidentCount) || 0;
+  const alertThreatDefineStatistics = buildThreatDefineStatisticsCells(xdrAlertThreatDefineCounts, {
+    labelRow: 133,
+    ratioRow: 134,
+    maxItems: 7
+  });
+  const incidentThreatDefineStatistics = buildThreatDefineStatisticsCells(xdrIncidentThreatDefineCounts, {
+    labelRow: 135,
+    countRow: 136,
+    ratioRow: 137,
+    maxItems: 10
+  });
 
   const cells = {
     J1: customer || '',
@@ -1696,7 +1739,7 @@ function buildStatisticsCells(statsContext) {
     D27: xdrLogSearchCount,
     D28: d28,
     D29: d29,
-    D30: '100%',
+    D30: '手写',
     D32: '100%',
     D33: '',
     D34: d34,
@@ -1742,7 +1785,7 @@ function buildStatisticsCells(statsContext) {
     D111: d111,
     D112: d112,
     D129: d129,
-    E130: e130,
+    D130: d130,
     D128: d128,
     E83: e83,
     E84: e84,
@@ -1789,12 +1832,15 @@ function buildStatisticsCells(statsContext) {
     G105: g105,
     G106: g106,
     G107: g107,
+    ...alertThreatDefineStatistics.cells,
+    ...incidentThreatDefineStatistics.cells,
     D100: d100,
     D101: d101,
     D102: d102,
     D105: d105
   };
   cells.__blankCells = blankTrendCells.concat(holidaySummaryBlankCells, ['D3', 'D4', 'D5', 'D7', 'D8', 'D9']);
+  cells.__percentCells = alertThreatDefineStatistics.percentCells.concat(incidentThreatDefineStatistics.percentCells);
   return cells;
 }
 
@@ -1806,7 +1852,9 @@ function populateStatisticsSheet(wb, statsContext) {
   const ws = wb.Sheets['数据统计'];
   const cells = buildStatisticsCells(statsContext);
   const blankCells = Array.isArray(cells.__blankCells) ? cells.__blankCells : [];
+  const percentCells = Array.isArray(cells.__percentCells) ? cells.__percentCells : [];
   delete cells.__blankCells;
+  delete cells.__percentCells;
 
   blankCells.forEach(address => {
     setWorksheetCellValue(ws, address, '');
@@ -1815,6 +1863,11 @@ function populateStatisticsSheet(wb, statsContext) {
   Object.entries(cells).forEach(([address, value]) => {
     if (value === '' || value === null || value === undefined) return;
     setWorksheetCellValue(ws, address, value);
+  });
+  percentCells.forEach(address => {
+    if (Object.prototype.hasOwnProperty.call(cells, address)) {
+      setWorksheetPercentCellValue(ws, address, cells[address]);
+    }
   });
 
   return cells;
@@ -1842,7 +1895,7 @@ function generateReport(options) {
     weakPwdHandledTotal,
     weakPwdHandledList,
     d129,
-    e130,
+    d130,
     topnReportStats,
     eventData,
     eventStats,
@@ -1861,6 +1914,8 @@ function generateReport(options) {
     xdrG105IncidentCount,
     xdrG106IncidentCount,
     xdrG107IncidentCount,
+    xdrAlertThreatDefineCounts,
+    xdrIncidentThreatDefineCounts,
     xdrMonthlyIn2outLogSearchCounts,
     xdrMonthlyOut2inLogSearchCounts,
     xdrLogSearchCount,
@@ -1925,7 +1980,7 @@ function generateReport(options) {
       weakPwdHandledTotal,
       weakPwdHandledList,
       d129,
-      e130,
+      d130,
       topnReportStats,
       xdrIn2outLogSearchCount,
       xdrOut2inLogSearchCount,
@@ -1938,6 +1993,8 @@ function generateReport(options) {
       xdrG105IncidentCount,
       xdrG106IncidentCount,
       xdrG107IncidentCount,
+      xdrAlertThreatDefineCounts,
+      xdrIncidentThreatDefineCounts,
       xdrMonthlyIn2outLogSearchCounts,
       xdrMonthlyOut2inLogSearchCounts,
       xdrLogSearchCount,

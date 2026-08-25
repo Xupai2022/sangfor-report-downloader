@@ -48,6 +48,8 @@ const API_CONFIG = {
   xdrIncidentTableCountEndpoint: '/ngsoc/INCIDENT/api/v1/table/count/incidentTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
   xdrIncidentTableQueryEndpoint: '/ngsoc/INCIDENT/api/v1/table/query/incidentTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
   xdrAlertTableQueryEndpoint: '/ngsoc/INCIDENT/api/v1/table/query/alertTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
+  xdrAlertThreatDefineCountEndpoint: '/ngsoc/INCIDENT/api/v1/search/count/alertTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
+  xdrIncidentThreatDefineCountEndpoint: '/ngsoc/INCIDENT/api/v1/search/count/incidentTableQueryHandler?viewRegionId=ffffffffffffffffffffffff&onlySelfPlatform=false',
   orderBranchEndpoint: '/gateway/customer-mgr-service/order/v1/branch/dev?_method=GET'
 };
 
@@ -421,6 +423,22 @@ function buildXdrAlertTableCountRequestBody(params) {
     viewInstanceId: '',
     enableHistory: true
   };
+}
+
+function buildXdrAlertThreatDefineCountRequestBody(params) {
+  const body = buildXdrAlertTableCountRequestBody(params);
+  body.fieldName = 'threatDefine';
+  body.fieldValue = {};
+  body.headerType = 'alertThreatDefine';
+  return body;
+}
+
+function buildXdrIncidentThreatDefineCountRequestBody(params) {
+  const body = buildXdrIncidentTableCountRequestBody(params);
+  body.fieldName = 'threatDefine';
+  body.fieldValue = {};
+  body.headerType = 'eventThreatDefine';
+  return body;
 }
 
 function buildXdrIncidentTableQueryCountRequestBody(params) {
@@ -2331,6 +2349,70 @@ async function fetchXdrAlertTableCount(cookieInfo, params) {
   return count;
 }
 
+async function fetchXdrAlertThreatDefineCounts(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
+    throw new Error(`XDR alert threatDefine count 时间范围无效: ${params.start} ~ ${params.end}`);
+  }
+  if (params.start > params.end) {
+    throw new Error(`XDR alert threatDefine count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
+  }
+
+  const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrAlertThreatDefineCountEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
+  const body = JSON.stringify(buildXdrAlertThreatDefineCountRequestBody(params));
+  const result = await httpPost(url, headers, body);
+  const rows = result && result.code === 0 && result.data && result.data.data;
+
+  if (!Array.isArray(rows)) {
+    throw new Error(`XDR alert threatDefine count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  return rows.map((item) => {
+    const count = Number(item && item.count);
+    if (!Number.isFinite(count) || count < 0) {
+      throw new Error(`XDR alert threatDefine count 响应 count 不是有效数字: ${JSON.stringify(item)}`);
+    }
+    return {
+      label: String((item && item.label) || ''),
+      count
+    };
+  });
+}
+
+async function fetchXdrIncidentThreatDefineCounts(cookieInfo, params) {
+  const { cookieString, csrfToken } = cookieInfo;
+  if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
+    throw new Error(`XDR incident threatDefine count 时间范围无效: ${params.start} ~ ${params.end}`);
+  }
+  if (params.start > params.end) {
+    throw new Error(`XDR incident threatDefine count 开始时间不能晚于结束时间: ${params.start} ~ ${params.end}`);
+  }
+
+  const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentThreatDefineCountEndpoint}`;
+  const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
+  const body = JSON.stringify(buildXdrIncidentThreatDefineCountRequestBody(params));
+  const result = await httpPost(url, headers, body);
+  const rows = result && result.code === 0 && result.data && result.data.data;
+
+  if (!Array.isArray(rows)) {
+    throw new Error(`XDR incident threatDefine count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+  }
+
+  return rows.map((item) => {
+    const count = Number(item && item.count);
+    if (!Number.isFinite(count) || count < 0) {
+      throw new Error(`XDR incident threatDefine count 响应 count 不是有效数字: ${JSON.stringify(item)}`);
+    }
+    return {
+      label: String((item && item.label) || ''),
+      count
+    };
+  });
+}
+
 async function fetchXdrIncidentTableQueryCount(cookieInfo, params) {
   const { cookieString, csrfToken } = cookieInfo;
   if (!Number.isFinite(params.start) || !Number.isFinite(params.end)) {
@@ -2605,6 +2687,8 @@ module.exports = {
   buildXdrG106IncidentCountRequestBody,
   buildXdrG107IncidentCountRequestBody,
   buildXdrAlertTableCountRequestBody,
+  buildXdrAlertThreatDefineCountRequestBody,
+  buildXdrIncidentThreatDefineCountRequestBody,
   buildCustomerBusinessUrl,
   buildHomeUrl,
   httpPost,
@@ -2656,6 +2740,8 @@ module.exports = {
   fetchXdrG106IncidentCount,
   fetchXdrG107IncidentCount,
   fetchXdrAlertTableCount,
+  fetchXdrAlertThreatDefineCounts,
+  fetchXdrIncidentThreatDefineCounts,
   fetchXdrIn2outLogSearchCountForRanges,
   fetchCompanyPage,
   resolveCompanyIdByName
