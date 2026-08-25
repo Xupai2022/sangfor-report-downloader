@@ -2280,22 +2280,22 @@ async function fetchXdrIncidentTableQueryCount(cookieInfo, params) {
   }
 
   const xdrBaseUrl = getXdrBaseUrl(cookieInfo);
-  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableQueryEndpoint}`;
+  const url = `https://${xdrBaseUrl}${API_CONFIG.xdrIncidentTableCountEndpoint}`;
   const headers = generateXdrHeaders(cookieString, csrfToken, {}, xdrBaseUrl);
   const body = JSON.stringify(buildXdrIncidentTableQueryCountRequestBody(params));
-  console.log('[ApiClient] G102 incidentTable query 请求参数:', body);
+  console.log('[ApiClient] G102 incidentTable count 请求参数:', body);
   const result = await httpPost(url, headers, body);
 
   if (!result || result.code !== 0 || !result.data) {
-    console.error('[ApiClient] G102 incidentTable query 响应异常:', JSON.stringify(result).substring(0, 1000));
-    throw new Error(`XDR incidentTable query count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
+    console.error('[ApiClient] G102 incidentTable count 响应异常:', JSON.stringify(result).substring(0, 1000));
+    throw new Error(`XDR G102 incidentTable count 接口返回异常: ${JSON.stringify(result).substring(0, 500)}`);
   }
 
   const count = Number(result.data.total);
   if (!Number.isFinite(count)) {
-    throw new Error(`XDR incidentTable query count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
+    throw new Error(`XDR G102 incidentTable count 响应 data.total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
   }
-  console.log(`[G102] XDR incidentTable query 返回 total: ${count}`);
+  console.log(`[G102] XDR incidentTable count 返回 total: ${count}`);
   return count;
 }
 
