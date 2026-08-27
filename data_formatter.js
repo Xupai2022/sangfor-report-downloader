@@ -1207,16 +1207,21 @@ function buildCoreSystemTicketStatistics({
     && toText(row.event_status) === '已闭环'
     && rowContainsAnyIp(row, ['host_ip', 'affected_assets'], ipSet)
   )).length;
+  const totalWeakPwdCount = sumWeakPwdTicketTotalsForIps(weakPwdAllTotalsByIp, ipSet);
+  const handledWeakPwdCount = sumWeakPwdTicketTotalsForIps(weakPwdHandledTotalsByIp, ipSet);
   const total = totalVulnCount
-    + sumWeakPwdTicketTotalsForIps(weakPwdAllTotalsByIp, ipSet)
+    + totalWeakPwdCount
     + totalLatestThreatCount;
   const handledTotal = handledVulnCount
-    + sumWeakPwdTicketTotalsForIps(weakPwdHandledTotalsByIp, ipSet)
+    + handledWeakPwdCount
     + handledLatestThreatCount;
 
   return {
     total,
     handledTotal,
+    totalVulnCount,
+    totalWeakPwdCount,
+    totalLatestThreatCount,
     ratio: total > 0 ? handledTotal / total : 0
   };
 }
@@ -1627,6 +1632,11 @@ function buildStatisticsCells(statsContext) {
     weakPwdHandledTotalsByIp
   }));
   const [coreSystem1 = {}, coreSystem2 = {}, coreSystem3 = {}] = coreSystemTicketStats;
+  if (businessSystemStats[0]) {
+    console.log(`[G111] System: ${businessSystemStats[0].name}; IP count: ${(businessSystemStats[0].ips || []).length}; Vulnerabilities: ${coreSystem1.totalVulnCount || 0}; Weak passwords: ${coreSystem1.totalWeakPwdCount || 0}; Latest threats: ${coreSystem1.totalLatestThreatCount || 0}; Total: ${coreSystem1.total || 0}`);
+  } else {
+    console.log('[G111] No first business system configured; G111=0');
+  }
   const g111 = coreSystem1.total || 0;
   const g112 = coreSystem1.handledTotal || 0;
   const g113 = coreSystem1.ratio || 0;
