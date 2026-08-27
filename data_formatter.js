@@ -1370,18 +1370,17 @@ function buildStatisticsCells(statsContext) {
     eventRows,
     accountSecurityKeywords
   );
-  const d113WeakPwdAssetIps = new Set();
+  const d113AssetIps = new Set();
   weakPwdSummaryList.forEach((row) => {
-    extractIPv4Texts(row && row.ip).forEach(ip => d113WeakPwdAssetIps.add(ip));
+    extractIPv4Texts(row && row.ip).forEach(ip => d113AssetIps.add(ip));
   });
-  const d113EventAffectedAssetIps = new Set();
   eventRows.forEach((row) => {
     const manageSubType = getEventManageSubTypeName(row);
     if (!manageSubType || !accountSecurityKeywords.some(keyword => manageSubType.includes(keyword))) return;
-    extractIPv4Texts(row && row.affected_assets).forEach(ip => d113EventAffectedAssetIps.add(ip));
+    extractIPv4Texts(row && row.affected_assets).forEach(ip => d113AssetIps.add(ip));
   });
-  const d113 = d113WeakPwdAssetIps.size + d113EventAffectedAssetIps.size;
-  const d114 = eventRows.filter(row => toText(row.type) === '未公开威胁').length;
+  const d113 = d113AssetIps.size;
+  const d114 = eventRows.filter(row => toText(row.type).includes('未公开威胁')).length;
   const d115 = d12;
   const g110 = d115;
   const accountSecurityClosedEventCount = eventRows.filter((row) => (
