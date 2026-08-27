@@ -1177,6 +1177,50 @@ function buildBusinessSystemStatistics(statsContext) {
   });
 }
 
+function sumWeakPwdTicketTotalsForIps(totalsByIp, ipSet) {
+  if (!totalsByIp || typeof totalsByIp !== 'object' || !ipSet || ipSet.size === 0) return 0;
+  return Object.entries(totalsByIp).reduce((total, [ip, count]) => (
+    ipSet.has(ip) ? total + (toNumericOrNull(count) || 0) : total
+  ), 0);
+}
+
+function buildCoreSystemTicketStatistics({
+  ipSet,
+  vulnRows,
+  eventRows,
+  weakPwdAllTotalsByIp,
+  weakPwdHandledTotalsByIp
+}) {
+  const totalVulnCount = vulnRows.filter(row => (
+    rowContainsAnyIp(row, ['IP', '受影响主机/位置'], ipSet)
+  )).length;
+  const handledVulnCount = vulnRows.filter(row => (
+    ['已防护', '已修复'].includes(toText(row['跟进状态']))
+    && rowContainsAnyIp(row, ['IP', '受影响主机/位置'], ipSet)
+  )).length;
+  const totalLatestThreatCount = eventRows.filter(row => (
+    toText(row.event_grading_tag) === '最新威胁'
+    && rowContainsAnyIp(row, ['host_ip', 'affected_assets'], ipSet)
+  )).length;
+  const handledLatestThreatCount = eventRows.filter(row => (
+    toText(row.event_grading_tag) === '最新威胁'
+    && toText(row.event_status) === '已闭环'
+    && rowContainsAnyIp(row, ['host_ip', 'affected_assets'], ipSet)
+  )).length;
+  const total = totalVulnCount
+    + sumWeakPwdTicketTotalsForIps(weakPwdAllTotalsByIp, ipSet)
+    + totalLatestThreatCount;
+  const handledTotal = handledVulnCount
+    + sumWeakPwdTicketTotalsForIps(weakPwdHandledTotalsByIp, ipSet)
+    + handledLatestThreatCount;
+
+  return {
+    total,
+    handledTotal,
+    ratio: total > 0 ? handledTotal / total : 0
+  };
+}
+
 function setWorksheetCellValue(ws, address, value) {
   const cell = getWorksheetCell(ws, address);
   ensureWorksheetRefIncludesCell(ws, address);
@@ -1265,8 +1309,11 @@ function buildStatisticsCells(statsContext) {
     exposedSurfacePortCount = '',
     weakPwdSummaryTotal = 0,
     weakPwdSummaryList = [],
+    weakPwdAllSummaryList = [],
+    weakPwdAllTotalsByIp = {},
     weakPwdHandledTotal = 0,
     weakPwdHandledList = [],
+    weakPwdHandledTotalsByIp = {},
     d129 = '',
     d130 = '',
     topnReportStats = null,
@@ -1318,10 +1365,25 @@ function buildStatisticsCells(statsContext) {
       && toText(row.type).includes('未公开威胁')
     ))
     .reduce((total, row) => total + countAffectedAssetIps(row.affected_assets), 0);
+  const accountSecurityKeywords = ['弱口令', '弱密码', '账号安全'];
   const accountSecurityKeywordEventCount = countEventRowsByManageSubTypeKeywords(
     eventRows,
-    ['弱口令', '弱密码', '账号安全']
+    accountSecurityKeywords
   );
+  const d113WeakPwdAssetIps = new Set();
+  weakPwdSummaryList.forEach((row) => {
+    extractIPv4Texts(row && row.ip).forEach(ip => d113WeakPwdAssetIps.add(ip));
+  });
+  const d113EventAffectedAssetIps = new Set();
+  eventRows.forEach((row) => {
+    const manageSubType = getEventManageSubTypeName(row);
+    if (!manageSubType || !accountSecurityKeywords.some(keyword => manageSubType.includes(keyword))) return;
+    extractIPv4Texts(row && row.affected_assets).forEach(ip => d113EventAffectedAssetIps.add(ip));
+  });
+  const d113 = d113WeakPwdAssetIps.size + d113EventAffectedAssetIps.size;
+  const d114 = eventRows.filter(row => toText(row.type) === '未公开威胁').length;
+  const d115 = d12;
+  const g110 = d115;
   const accountSecurityClosedEventCount = eventRows.filter((row) => (
     isDateInRange(row.create_time, range)
     && toText(row.event_status) === '已闭环'
@@ -1335,7 +1397,10 @@ function buildStatisticsCells(statsContext) {
     toText(row['跟进状态']) === '已修复'
     && isDateInRange(row['更新时间'], range)
   )).length;
+  const d116 = d14;
+  const d117 = d15;
   const d16 = (toNumericOrNull(weakPwdHandledTotal) || 0) + accountSecurityClosedEventCount;
+  const d118 = d16;
   const d17 = d12;
   const d13 = d17 + d14 + d15;
   const d24 = alarmRows.filter((row) => (
@@ -1555,6 +1620,23 @@ function buildStatisticsCells(statsContext) {
     weakPwdSummaryList,
     weakPwdHandledList
   });
+  const coreSystemTicketStats = businessSystemStats.map((system) => buildCoreSystemTicketStatistics({
+    ipSet: new Set((system && system.ips) || []),
+    vulnRows,
+    eventRows,
+    weakPwdAllTotalsByIp,
+    weakPwdHandledTotalsByIp
+  }));
+  const [coreSystem1 = {}, coreSystem2 = {}, coreSystem3 = {}] = coreSystemTicketStats;
+  const g111 = coreSystem1.total || 0;
+  const g112 = coreSystem1.handledTotal || 0;
+  const g113 = coreSystem1.ratio || 0;
+  const g114 = coreSystem2.total || 0;
+  const g115 = coreSystem2.handledTotal || 0;
+  const g116 = coreSystem2.ratio || 0;
+  const g117 = coreSystem3.total || 0;
+  const g118 = coreSystem3.handledTotal || 0;
+  const g119 = coreSystem3.ratio || 0;
   const aggregatedBusinessSystemIps = new Set();
   businessSystemStats.forEach((item) => {
     (item && Array.isArray(item.ips) ? item.ips : []).forEach(ip => aggregatedBusinessSystemIps.add(ip));
@@ -1784,6 +1866,12 @@ function buildStatisticsCells(statsContext) {
     D110: d110,
     D111: d111,
     D112: d112,
+    D113: d113,
+    D114: d114,
+    D115: d115,
+    D116: d116,
+    D117: d117,
+    D118: d118,
     D129: d129,
     D130: d130,
     D128: d128,
@@ -1832,6 +1920,16 @@ function buildStatisticsCells(statsContext) {
     G105: g105,
     G106: g106,
     G107: g107,
+    G110: g110,
+    G111: g111,
+    G112: g112,
+    G113: g113,
+    G114: g114,
+    G115: g115,
+    G116: g116,
+    G117: g117,
+    G118: g118,
+    G119: g119,
     ...alertThreatDefineStatistics.cells,
     ...incidentThreatDefineStatistics.cells,
     D100: d100,
@@ -1840,7 +1938,8 @@ function buildStatisticsCells(statsContext) {
     D105: d105
   };
   cells.__blankCells = blankTrendCells.concat(holidaySummaryBlankCells, ['D3', 'D4', 'D5', 'D7', 'D8', 'D9']);
-  cells.__percentCells = alertThreatDefineStatistics.percentCells.concat(incidentThreatDefineStatistics.percentCells);
+  cells.__percentCells = alertThreatDefineStatistics.percentCells
+    .concat(incidentThreatDefineStatistics.percentCells, ['G113', 'G116', 'G119']);
   return cells;
 }
 
@@ -1892,8 +1991,11 @@ function generateReport(options) {
     exposedSurfacePortCount,
     weakPwdSummaryTotal,
     weakPwdSummaryList,
+    weakPwdAllSummaryList,
+    weakPwdAllTotalsByIp,
     weakPwdHandledTotal,
     weakPwdHandledList,
+    weakPwdHandledTotalsByIp,
     d129,
     d130,
     topnReportStats,
@@ -1977,8 +2079,11 @@ function generateReport(options) {
       exposedSurfacePortCount,
       weakPwdSummaryTotal,
       weakPwdSummaryList,
+      weakPwdAllSummaryList,
+      weakPwdAllTotalsByIp,
       weakPwdHandledTotal,
       weakPwdHandledList,
+      weakPwdHandledTotalsByIp,
       d129,
       d130,
       topnReportStats,

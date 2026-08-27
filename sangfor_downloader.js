@@ -538,8 +538,11 @@ async function downloadReports(options) {
       exposedSurfacePortCount: null,
       weakPwdSummaryTotal: null,
       weakPwdSummaryList: [],
+      weakPwdAllSummaryList: [],
+      weakPwdAllTotalsByIp: {},
       weakPwdHandledTotal: null,
       weakPwdHandledList: [],
+      weakPwdHandledTotalsByIp: {},
       d129: null,
       d130: null,
       topnReportStats: null,
@@ -642,7 +645,9 @@ async function downloadReports(options) {
       }
     }
 
-    if (shouldFetchType(options.type, 'vuln')) {
+    // D129 is calculated from second_level entries, so the vulnerability rows
+    // must be loaded whenever the protection-period statistic is requested.
+    if (shouldFetchType(options.type, 'vuln') || (options.protectStartDate && options.protectEndDate)) {
       console.log('\n--- 下载资产漏洞表 ---');
       try {
         results.vulnData = await requestWithRetry(
@@ -673,6 +678,23 @@ async function downloadReports(options) {
       throw error;
     }
 
+    console.log('\n--- 查询全部弱口令统计 (G111) ---');
+    try {
+      const weakPwdAllSummary = await requestWithRetry(
+        (params) => apiClient.fetchWeakPwdSummary(cookieInfo, {
+          ...params,
+          isAdmin: 0
+        }),
+        requestParams
+      );
+      results.weakPwdAllSummaryList = weakPwdAllSummary.list;
+      results.weakPwdAllTotalsByIp = weakPwdAllSummary.totalsByIp;
+      console.log(`[成功] 全部弱口令资产统计: ${results.weakPwdAllSummaryList.length}`);
+    } catch (error) {
+      results.weakPwdError = error.message;
+      throw new Error(`全部弱口令统计失败: ${error.message}`);
+    }
+
     console.log('\n--- 查询弱口令统计 ---');
     try {
       const weakPwdSummary = await requestWithRetry(
@@ -698,6 +720,7 @@ async function downloadReports(options) {
       );
       results.weakPwdHandledTotal = handledWeakPwdSummary.total;
       results.weakPwdHandledList = handledWeakPwdSummary.list;
+      results.weakPwdHandledTotalsByIp = handledWeakPwdSummary.totalsByIp;
       console.log(`[成功] 已处理弱口令统计: ${results.weakPwdHandledTotal}`);
     } catch (error) {
       results.weakPwdError = error.message;
@@ -715,10 +738,11 @@ async function downloadReports(options) {
           startTime: subtractDays(options.protectStartDate, 7),
           endTime: options.protectEndDate
         };
-        results.d129 = await requestWithRetry(
-          (params) => apiClient.fetchVulnPortSplitTotal(cookieInfo, params),
-          d129RequestParams
-        );
+        results.d129 = soarTransformer.countVulnSecondLevelEntries(results.vulnData, {
+          startTime: d129RequestParams.startTime,
+          endTime: d129RequestParams.endTime,
+          statuses: [2, 4]
+        });
         console.log(`[成功] 漏洞端口拆分统计: D129=${results.d129}`);
       } catch (error) {
         results.vulnPortSplitError = error.message;
@@ -974,8 +998,11 @@ async function downloadReports(options) {
       exposedSurfacePortCount: results.exposedSurfacePortCount,
       weakPwdSummaryTotal: results.weakPwdSummaryTotal,
       weakPwdSummaryList: results.weakPwdSummaryList,
+      weakPwdAllSummaryList: results.weakPwdAllSummaryList,
+      weakPwdAllTotalsByIp: results.weakPwdAllTotalsByIp,
       weakPwdHandledTotal: results.weakPwdHandledTotal,
       weakPwdHandledList: results.weakPwdHandledList,
+      weakPwdHandledTotalsByIp: results.weakPwdHandledTotalsByIp,
       d129: results.d129,
       d130: results.d130,
       topnReportStats: results.topnReportStats,

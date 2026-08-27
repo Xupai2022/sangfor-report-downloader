@@ -809,6 +809,36 @@ function transformVulnDocs(vulnDocs, options = {}) {
     .flatMap(doc => transformVulnDoc(doc, ctx));
 }
 
+function normalizeVulnTimestamp(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value < 1e12 ? value * 1000 : value;
+  }
+  if (value === null || value === undefined || value === '') return NaN;
+  const numeric = Number(value);
+  if (Number.isFinite(numeric)) return numeric < 1e12 ? numeric * 1000 : numeric;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : NaN;
+}
+
+function countVulnSecondLevelEntries(vulnDocs, { startTime, endTime, statuses = [2, 4] } = {}) {
+  const start = normalizeVulnTimestamp(startTime);
+  const endDate = normalizeVulnTimestamp(endTime);
+  const end = Number.isFinite(endDate)
+    ? (String(endTime).match(/^\d{4}-\d{2}-\d{2}$/) ? endDate + 24 * 60 * 60 * 1000 - 1 : endDate)
+    : NaN;
+  const statusSet = new Set(statuses.map(status => String(status)));
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return 0;
+
+  return (vulnDocs || []).reduce((total, doc) => {
+    const levels = Array.isArray(doc && doc.second_level) ? doc.second_level : [];
+    return total + levels.filter(level => {
+      if (!level || !statusSet.has(String(level.vuln_status))) return false;
+      const updated = normalizeVulnTimestamp(level.last_time);
+      return Number.isFinite(updated) && updated >= start && updated <= end;
+    }).length;
+  }, 0);
+}
+
 module.exports = {
   EVENT_OUTPUT_FIELDS,
   ALARM_OUTPUT_FIELDS,
@@ -817,6 +847,7 @@ module.exports = {
   transformEventDocsWithStats,
   transformAlarmDocs,
   transformVulnDocs,
+  countVulnSecondLevelEntries,
   loadManageSubTypeMap,
   loadAssetSecurityDomainMap,
   loadAssetSecurityDomainMapFromBuffer,

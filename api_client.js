@@ -1146,6 +1146,10 @@ function extractXlsxFromZipOrSelf(buffer) {
 function buildVulnRequestBody(params) {
   const pageSize = params.pageSize || 100;
   const page = params.page || 1;
+  const startTimestamp = dateToTimestamp(params.startTime);
+  const endTimestamp = dateToTimestamp(params.endTime);
+  // 与弱口令接口一致，漏洞接口按命令行报告区间筛选发现时间，结束日包含到 23:59:59。
+  const endOfDay = endTimestamp + 24 * 60 * 60 * 1000 - 1000;
 
   return {
     order: {},
@@ -1165,7 +1169,7 @@ function buildVulnRequestBody(params) {
     asset_list: [],
     scene_tag: [],
     scan_method: -1,
-    found_time: [],
+    found_time: [startTimestamp, endOfDay],
     last_time: [],
     vulnerability_level: -1,
     company_id: String(params.customerId || '')
@@ -1195,8 +1199,8 @@ function buildVulnPortSplitTotalRequestBody(params) {
     asset_list: [],
     scene_tag: [],
     scan_method: -1,
-    found_time: [],
-    last_time: [startTimestamp, endOfDay],
+    found_time: [startTimestamp, endOfDay],
+    last_time: [],
     vulnerability_level: -1,
     company_id: String(params.customerId || '')
   };
@@ -1207,6 +1211,7 @@ function buildWeakPwdSummaryRequestBody(params) {
   const endTimestamp = dateToTimestamp(params.endTime);
   const endOfDay = endTimestamp + 24 * 60 * 60 * 1000;
   const dealStatus = Array.isArray(params.dealStatus) ? params.dealStatus : [];
+  const isAdmin = params.isAdmin === undefined ? 1 : params.isAdmin;
   const pageSize = params.pageSize || 100;
   const page = params.page || 1;
 
@@ -1225,7 +1230,7 @@ function buildWeakPwdSummaryRequestBody(params) {
     login_time: [],
     found_time: [startTimestamp, endOfDay],
     reappear: 0,
-    is_admin: 1,
+    is_admin: isAdmin,
     risk_level: [],
     deal_status: dealStatus,
     company_id: String(params.customerId || '')
@@ -1722,6 +1727,7 @@ async function fetchWeakPwdSummary(cookieInfo, params) {
     .map(row => String(row && row.ip || '').trim())
     .filter(Boolean))];
   let total = 0;
+  const totalsByIp = {};
   for (let index = 0; index < ips.length; index += 1) {
     const ip = ips[index];
     const { cookieString, csrfToken } = cookieInfo;
@@ -1740,6 +1746,7 @@ async function fetchWeakPwdSummary(cookieInfo, params) {
       throw new Error(`IP ${ip} 弱口令明细 total 不是有效数字: ${JSON.stringify(result).substring(0, 500)}`);
     }
     total += ipTotal;
+    totalsByIp[ip] = ipTotal;
     console.log(`[ApiClient] IP ${ip} 弱口令数: ${ipTotal}，累计: ${total}`);
 
     const pageDelayMs = Number.isFinite(params.pageDelayMs) ? params.pageDelayMs : 10;
@@ -1750,7 +1757,8 @@ async function fetchWeakPwdSummary(cookieInfo, params) {
 
   return {
     total,
-    list: allRows
+    list: allRows,
+    totalsByIp
   };
 }
 
