@@ -1485,7 +1485,7 @@ function buildStatisticsCells(statsContext) {
       getEventManageSubTypeName(row).includes(keyword)
     ))
   )).length;
-  const d121 = `${d122 + d126}15-3/15-4/15-5`;
+  const d121 = `${d122 + d126}+15-3/15-4/15-5`;
   const e83 = countHandledVulnByLevel('高危');
   const e84 = countHandledVulnByLevel('中危');
   const e85 = countHandledVulnByLevel('低危');
