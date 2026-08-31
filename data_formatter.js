@@ -1316,9 +1316,11 @@ function buildStatisticsCells(statsContext) {
     weakPwdSummaryList = [],
     weakPwdAllSummaryList = [],
     weakPwdAllTotalsByIp = {},
+    weakPwdAllTotal = 0,
     weakPwdHandledTotal = 0,
     weakPwdHandledList = [],
     weakPwdHandledTotalsByIp = {},
+    g126 = 0,
     d129 = '',
     d130 = '',
     topnReportStats = null,
@@ -1476,6 +1478,14 @@ function buildStatisticsCells(statsContext) {
   );
   const d110 = highRiskVulnRows.length;
   const d111 = highRiskIpSet.size;
+  const d122 = d110 + d115;
+  const d126 = eventRows.filter((row) => (
+    isDateInRange(row.create_time, range)
+    && ['\u7f51\u7ad9\u7be1\u6539', '\u9ed1\u94fe'].some(keyword => (
+      getEventManageSubTypeName(row).includes(keyword)
+    ))
+  )).length;
+  const d121 = `${d122 + d126}15-3/15-4/15-5`;
   const e83 = countHandledVulnByLevel('高危');
   const e84 = countHandledVulnByLevel('中危');
   const e85 = countHandledVulnByLevel('低危');
@@ -1650,6 +1660,17 @@ function buildStatisticsCells(statsContext) {
   businessSystemStats.forEach((item) => {
     (item && Array.isArray(item.ips) ? item.ips : []).forEach(ip => aggregatedBusinessSystemIps.add(ip));
   });
+  const i123 = sumWeakPwdTicketTotalsForIps(
+    weakPwdHandledTotalsByIp,
+    aggregatedBusinessSystemIps
+  );
+  const i124 = eventRows.filter((row) => (
+    isDateInRange(row.create_time, range)
+    && toText(row.event_status) === '已闭环'
+    && ['\u6728\u9a6c', '\u75c5\u6bd2'].some(keyword => (
+      getEventManageSubTypeName(row).includes(keyword)
+    ))
+  )).length;
   const businessSystemAlarmCounts = businessSystemStats.map((item) => {
     const ipSet = new Set(item && Array.isArray(item.ips) ? item.ips : []);
     return countRowsContainingIps(alarmRows, ['host_ip'], ipSet);
@@ -1881,6 +1902,9 @@ function buildStatisticsCells(statsContext) {
     D116: d116,
     D117: d117,
     D118: d118,
+    D121: d121,
+    D122: d122,
+    D126: d126,
     D129: d129,
     D130: d130,
     D128: d128,
@@ -1894,6 +1918,9 @@ function buildStatisticsCells(statsContext) {
     I80: i80,
     I81: i81,
     I82: i82,
+    I122: toNumericOrNull(weakPwdHandledTotal) || 0,
+    I123: i123,
+    I124: i124,
     K79: k79,
     K80: k80,
     K81: k81,
@@ -1939,6 +1966,11 @@ function buildStatisticsCells(statsContext) {
     G117: g117,
     G118: g118,
     G119: g119,
+    G122: d110,
+    G123: d12,
+    G124: d15,
+    G125: toNumericOrNull(weakPwdAllTotal) || 0,
+    G126: toNumericOrNull(g126) || 0,
     ...alertThreatDefineStatistics.cells,
     ...incidentThreatDefineStatistics.cells,
     D100: d100,
@@ -2002,9 +2034,11 @@ function generateReport(options) {
     weakPwdSummaryList,
     weakPwdAllSummaryList,
     weakPwdAllTotalsByIp,
+    weakPwdAllTotal,
     weakPwdHandledTotal,
     weakPwdHandledList,
     weakPwdHandledTotalsByIp,
+    g126,
     d129,
     d130,
     topnReportStats,
@@ -2090,9 +2124,11 @@ function generateReport(options) {
       weakPwdSummaryList,
       weakPwdAllSummaryList,
       weakPwdAllTotalsByIp,
+      weakPwdAllTotal,
       weakPwdHandledTotal,
       weakPwdHandledList,
       weakPwdHandledTotalsByIp,
+      g126,
       d129,
       d130,
       topnReportStats,

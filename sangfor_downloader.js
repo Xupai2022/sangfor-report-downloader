@@ -540,9 +540,11 @@ async function downloadReports(options) {
       weakPwdSummaryList: [],
       weakPwdAllSummaryList: [],
       weakPwdAllTotalsByIp: {},
+      weakPwdAllTotal: null,
       weakPwdHandledTotal: null,
       weakPwdHandledList: [],
       weakPwdHandledTotalsByIp: {},
+      g126: null,
       d129: null,
       d130: null,
       topnReportStats: null,
@@ -657,6 +659,9 @@ async function downloadReports(options) {
           }, 'data'),
           requestParams
         );
+        results.g126 = results.vulnData.filter((row) => (
+          String(row && row.name || '').includes('弱口令')
+        )).length;
         console.log(`[成功] 资产漏洞表: ${results.vulnData.length} 条记录`);
       } catch (error) {
         results.vulnError = error.message;
@@ -683,13 +688,15 @@ async function downloadReports(options) {
       const weakPwdAllSummary = await requestWithRetry(
         (params) => apiClient.fetchWeakPwdSummary(cookieInfo, {
           ...params,
-          isAdmin: 0
+          isAdmin: 0,
+          pageSize: 100
         }),
         requestParams
       );
       results.weakPwdAllSummaryList = weakPwdAllSummary.list;
       results.weakPwdAllTotalsByIp = weakPwdAllSummary.totalsByIp;
-      console.log(`[成功] 全部弱口令资产统计: ${results.weakPwdAllSummaryList.length}`);
+      results.weakPwdAllTotal = weakPwdAllSummary.total;
+      console.log(`[成功] 全部弱口令统计: ${results.weakPwdAllTotal}`);
     } catch (error) {
       results.weakPwdError = error.message;
       throw new Error(`全部弱口令统计失败: ${error.message}`);
@@ -1000,9 +1007,11 @@ async function downloadReports(options) {
       weakPwdSummaryList: results.weakPwdSummaryList,
       weakPwdAllSummaryList: results.weakPwdAllSummaryList,
       weakPwdAllTotalsByIp: results.weakPwdAllTotalsByIp,
+      weakPwdAllTotal: results.weakPwdAllTotal,
       weakPwdHandledTotal: results.weakPwdHandledTotal,
       weakPwdHandledList: results.weakPwdHandledList,
       weakPwdHandledTotalsByIp: results.weakPwdHandledTotalsByIp,
+      g126: results.g126,
       d129: results.d129,
       d130: results.d130,
       topnReportStats: results.topnReportStats,
