@@ -1127,7 +1127,6 @@ function buildBusinessSystemStatistics(statsContext) {
     const d10Count = vulnRows.filter((row) => (
       toText(row['漏洞等级']) === '高危'
       && toText(row['是否可利用']) === '是'
-      && isDateInRange(row['更新时间'], range)
       && rowContainsAnyIp(row, ['IP', '受影响主机/位置'], system.ips)
     )).length;
     const d11WeakPwdCount = countWeakPwdRowsContainingIps(weakPwdSummaryList, system.ips);
@@ -1142,7 +1141,6 @@ function buildBusinessSystemStatistics(statsContext) {
       toText(row['漏洞等级']) === '高危'
       && toText(row['是否可利用']) === '是'
       && toText(row['跟进状态']) === '已闭环'
-      && isDateInRange(row['更新时间'], range)
       && rowContainsAnyIp(row, ['IP', '受影响主机/位置'], system.ips)
     )).length;
     const closedLoopD11WeakPwdCount = countWeakPwdRowsContainingIps(weakPwdHandledList, system.ips);
@@ -1361,7 +1359,7 @@ function buildStatisticsCells(statsContext) {
       + 1
   );
 
-  const legacyD6 = vulnRows.filter(row => isDateInRange(row['更新时间'], range)).length;
+  const legacyD6 = vulnRows.length;
   const d11 = eventRows.filter((row) => (
     toText(row.event_grading_tag) === '最新威胁'
     && isDateInRange(row.create_time, range)
@@ -1397,11 +1395,9 @@ function buildStatisticsCells(statsContext) {
   )).length;
   const d14 = vulnRows.filter((row) => (
     toText(row['跟进状态']) === '已防护'
-    && isDateInRange(row['更新时间'], range)
   )).length;
   const d15 = vulnRows.filter((row) => (
     toText(row['跟进状态']) === '已修复'
-    && isDateInRange(row['更新时间'], range)
   )).length;
   const d116 = d14;
   const d117 = d15;
@@ -1441,12 +1437,10 @@ function buildStatisticsCells(statsContext) {
   const c80 = vulnRows.filter((row) => (
     toText(row['漏洞等级']) === '高危'
     && toText(row['是否可利用']) === '是'
-    && isDateInRange(row['更新时间'], range)
   )).length;
   const d80 = vulnRows.filter((row) => (
     toText(row['内/外网']) === '外网'
     && toText(row['跟进状态']).includes('已')
-    && isDateInRange(row['更新时间'], range)
   )).length;
   const highRiskExploitableRows = vulnRows.filter((row) => (
     toText(row['漏洞等级']) === '高危'
