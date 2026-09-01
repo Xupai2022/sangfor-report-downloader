@@ -1316,6 +1316,7 @@ function buildStatisticsCells(statsContext) {
     weakPwdAllTotalsByIp = {},
     weakPwdAllTotal = 0,
     weakPwdHandledTotal = 0,
+    weakPwdHandledAdminTotal = 0,
     weakPwdHandledList = [],
     weakPwdHandledTotalsByIp = {},
     g126 = 0,
@@ -1401,7 +1402,7 @@ function buildStatisticsCells(statsContext) {
   )).length;
   const d116 = d14;
   const d117 = d15;
-  const d16 = (toNumericOrNull(weakPwdHandledTotal) || 0) + accountSecurityClosedEventCount;
+  const d16 = (toNumericOrNull(weakPwdHandledAdminTotal) || 0) + accountSecurityClosedEventCount;
   const d118 = d16;
   const d17 = d12;
   const d13 = d17 + d14 + d15;
@@ -2030,6 +2031,7 @@ function generateReport(options) {
     weakPwdAllTotalsByIp,
     weakPwdAllTotal,
     weakPwdHandledTotal,
+    weakPwdHandledAdminTotal,
     weakPwdHandledList,
     weakPwdHandledTotalsByIp,
     g126,
@@ -2120,6 +2122,7 @@ function generateReport(options) {
       weakPwdAllTotalsByIp,
       weakPwdAllTotal,
       weakPwdHandledTotal,
+      weakPwdHandledAdminTotal,
       weakPwdHandledList,
       weakPwdHandledTotalsByIp,
       g126,

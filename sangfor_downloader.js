@@ -542,6 +542,7 @@ async function downloadReports(options) {
       weakPwdAllTotalsByIp: {},
       weakPwdAllTotal: null,
       weakPwdHandledTotal: null,
+      weakPwdHandledAdminTotal: null,
       weakPwdHandledList: [],
       weakPwdHandledTotalsByIp: {},
       g126: null,
@@ -733,6 +734,23 @@ async function downloadReports(options) {
     } catch (error) {
       results.weakPwdError = error.message;
       throw new Error(`已处理弱口令统计失败: ${error.message}`);
+    }
+
+    console.log('\n--- 查询管理员已处理弱口令统计 ---');
+    try {
+      const handledAdminWeakPwdSummary = await requestWithRetry(
+        (params) => apiClient.fetchWeakPwdSummary(cookieInfo, {
+          ...params,
+          isAdmin: 1,
+          dealStatus: [2]
+        }),
+        requestParams
+      );
+      results.weakPwdHandledAdminTotal = handledAdminWeakPwdSummary.total;
+      console.log(`[成功] 管理员已处理弱口令统计: ${results.weakPwdHandledAdminTotal}`);
+    } catch (error) {
+      results.weakPwdError = error.message;
+      throw new Error(`管理员已处理弱口令统计失败: ${error.message}`);
     }
 
     console.log('\n--- 查询漏洞端口拆分统计 (D129) ---');
@@ -1010,6 +1028,7 @@ async function downloadReports(options) {
       weakPwdAllTotalsByIp: results.weakPwdAllTotalsByIp,
       weakPwdAllTotal: results.weakPwdAllTotal,
       weakPwdHandledTotal: results.weakPwdHandledTotal,
+      weakPwdHandledAdminTotal: results.weakPwdHandledAdminTotal,
       weakPwdHandledList: results.weakPwdHandledList,
       weakPwdHandledTotalsByIp: results.weakPwdHandledTotalsByIp,
       g126: results.g126,
