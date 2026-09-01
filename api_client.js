@@ -1209,7 +1209,6 @@ function buildVulnPortSplitTotalRequestBody(params) {
 function buildWeakPwdSummaryRequestBody(params) {
   const startTimestamp = dateToTimestamp(params.startTime);
   const endTimestamp = dateToTimestamp(params.endTime);
-  const endOfDay = endTimestamp + 24 * 60 * 60 * 1000;
   const dealStatus = Array.isArray(params.dealStatus) ? params.dealStatus : [];
   const isAdmin = params.isAdmin === undefined ? 1 : params.isAdmin;
   const pageSize = params.pageSize || 100;
@@ -1228,7 +1227,7 @@ function buildWeakPwdSummaryRequestBody(params) {
     service_status: [],
     scene_tag: [],
     login_time: [],
-    found_time: [startTimestamp, endOfDay],
+    found_time: [startTimestamp, endTimestamp],
     reappear: 0,
     is_admin: isAdmin,
     risk_level: [],
