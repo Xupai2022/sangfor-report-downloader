@@ -721,6 +721,7 @@ async function downloadReports(options) {
       const handledWeakPwdSummary = await requestWithRetry(
         (params) => apiClient.fetchWeakPwdSummary(cookieInfo, {
           ...params,
+          isAdmin: 0,
           dealStatus: [2]
         }),
         requestParams
