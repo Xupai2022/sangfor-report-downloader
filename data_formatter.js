@@ -1612,10 +1612,7 @@ function buildStatisticsCells(statsContext) {
     ? eventStats.strategyOptimizeCount
     : '';
   const e80WeakPwdTotal = toNumericOrNull(weakPwdSummaryTotal) || 0;
-  const e80AccountSecurityEventCount = toNumericOrNull(
-    eventStats && eventStats.accountSecurityEventCountForE80
-  ) || 0;
-  const e80 = e80WeakPwdTotal + e80AccountSecurityEventCount;
+  const e80 = e80WeakPwdTotal + accountSecurityKeywordEventCount;
   const d10 = c80;
   const d11WeakPwdTotal = e80WeakPwdTotal + accountSecurityKeywordEventCount;
   const d112 = d11WeakPwdTotal;
