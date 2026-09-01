@@ -1671,6 +1671,7 @@ async function fetchOrderBranchTotal(cookieInfo, params, orderType) {
 
 async function fetchWeakPwdSummary(cookieInfo, params) {
   console.log(`[ApiClient] 开始分页获取弱口令统计...`);
+  const debugLabel = String(params && params.debugLabel || '').trim();
 
   const allRows = [];
   const pageSize = params.pageSize || 100;
@@ -1710,6 +1711,9 @@ async function fetchWeakPwdSummary(cookieInfo, params) {
     previousFingerprint = currentFingerprint;
 
     allRows.push(...rows);
+    if (debugLabel) {
+      console.log(`[${debugLabel}] summary page=${page}, rows=${rows.length}, accumulatedRows=${allRows.length}`);
+    }
     console.log(`[ApiClient] 弱口令统计第 ${page} 页获取到 ${rows.length} 条数据，累计 ${allRows.length} 条`);
 
     hasMore = getHasMoreFromResponse(result, rows, allRows.length, pageSize, 'data');
@@ -1726,6 +1730,9 @@ async function fetchWeakPwdSummary(cookieInfo, params) {
   const ips = [...new Set(allRows
     .map(row => String(row && row.ip || '').trim())
     .filter(Boolean))];
+  if (debugLabel) {
+    console.log(`[${debugLabel}] summary complete: rows=${allRows.length}, uniqueIps=${ips.length}`);
+  }
   let total = 0;
   const totalsByIp = {};
   for (let index = 0; index < ips.length; index += 1) {
@@ -1747,6 +1754,9 @@ async function fetchWeakPwdSummary(cookieInfo, params) {
     }
     total += ipTotal;
     totalsByIp[ip] = ipTotal;
+    if (debugLabel) {
+      console.log(`[${debugLabel}] detail ${index + 1}/${ips.length}: ip=${ip}, data.total=${ipTotal}, accumulatedTotal=${total}`);
+    }
     console.log(`[ApiClient] IP ${ip} 弱口令数: ${ipTotal}，累计: ${total}`);
 
     const pageDelayMs = Number.isFinite(params.pageDelayMs) ? params.pageDelayMs : 10;

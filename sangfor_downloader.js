@@ -723,13 +723,19 @@ async function downloadReports(options) {
         (params) => apiClient.fetchWeakPwdSummary(cookieInfo, {
           ...params,
           isAdmin: 0,
-          dealStatus: [2]
+          dealStatus: [2],
+          debugLabel: 'I122'
         }),
         requestParams
       );
       results.weakPwdHandledTotal = handledWeakPwdSummary.total;
       results.weakPwdHandledList = handledWeakPwdSummary.list;
       results.weakPwdHandledTotalsByIp = handledWeakPwdSummary.totalsByIp;
+      console.log(
+        `[I122] 最终取值: ${results.weakPwdHandledTotal}; `
+        + `汇总记录数: ${results.weakPwdHandledList.length}; `
+        + `明细 IP 数: ${Object.keys(results.weakPwdHandledTotalsByIp).length}`
+      );
       console.log(`[成功] 已处理弱口令统计: ${results.weakPwdHandledTotal}`);
     } catch (error) {
       results.weakPwdError = error.message;
