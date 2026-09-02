@@ -345,8 +345,8 @@ function buildXdrIncidentTableCountRequestBody(params) {
       viewName: 'IncidentView',
       aggregationStrategies: null,
       tableFields: [],
-      pageNum: 1,
-      pageSize: 1000,
+      pageNum: null,
+      pageSize: null,
       serviceInfo: {
         appName: 'incident',
         servletContextPath: '/',
@@ -487,8 +487,8 @@ function buildXdrIncidentTableQueryCountRequestBody(params) {
         { field: 'dealStatus', show: true, selected: true, sort: 'disable', columnWidth: 120, fixed: false, dataType: 'value' },
         { field: 'endTime', show: true, selected: true, sort: 'desc', columnWidth: 160, fixed: false, dataType: 'value' }
       ],
-      pageNum: 1,
-      pageSize: 1000,
+      pageNum: null,
+      pageSize: null,
       serviceInfo: {
         appName: 'incident',
         servletContextPath: '/',
@@ -567,8 +567,8 @@ function buildXdrG105IncidentCountRequestBody(params) {
       viewName: 'IncidentView',
       aggregationStrategies: null,
       tableFields: [],
-      pageNum: 1,
-      pageSize: 1000,
+      pageNum: null,
+      pageSize: null,
       serviceInfo: {
         appName: 'incident',
         servletContextPath: '/',
@@ -642,8 +642,8 @@ function buildXdrG103IncidentCountRequestBody(params) {
       viewName: 'IncidentView',
       aggregationStrategies: null,
       tableFields: [],
-      pageNum: 1,
-      pageSize: 50,
+      pageNum: null,
+      pageSize: null,
       serviceInfo: {
         appName: 'incident',
         servletContextPath: '/',
@@ -711,8 +711,8 @@ function buildXdrG106IncidentCountRequestBody(params) {
       viewName: 'IncidentView',
       aggregationStrategies: null,
       tableFields: [],
-      pageNum: 1,
-      pageSize: 50,
+      pageNum: null,
+      pageSize: null,
       serviceInfo: {
         appName: 'incident',
         servletContextPath: '/',
@@ -780,8 +780,8 @@ function buildXdrG107IncidentCountRequestBody(params) {
       viewName: 'IncidentView',
       aggregationStrategies: null,
       tableFields: [],
-      pageNum: 1,
-      pageSize: 1000,
+      pageNum: null,
+      pageSize: null,
       serviceInfo: {
         appName: 'incident',
         servletContextPath: '/',
