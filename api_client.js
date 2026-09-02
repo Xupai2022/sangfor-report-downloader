@@ -445,17 +445,17 @@ function buildXdrIncidentTableQueryCountRequestBody(params) {
   return {
     extensionParams: null,
     spl: {
-      mappedSpl: 'filter 处置状态  in { "处置完成" }',
-      originalSpl: 'filter 处置状态  in { "处置完成" }',
+      mappedSpl: 'filter 处置状态  in { "已遏制", "处置完成", "已忽略" }',
+      originalSpl: 'filter 处置状态  in { "已遏制", "处置完成", "已忽略" }',
       extensionParams: {
         frontRender: [
           {
             displayField: '处置状态',
             field: 'dealStatus',
-            value: [3],
+            value: [6, 3, 5],
             headerType: 'metaType',
             searchType: 'selector',
-            valueText: '处置完成',
+            valueText: '已遏制, 处置完成, 已忽略',
             isValueNegate: false,
             type: 'string',
             filterSelect: 'renderValue'
